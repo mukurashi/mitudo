@@ -228,7 +228,7 @@
       }, UPDATE_INTERVAL_MS);
     }
 
-    // ---- GeoTIFFから人口データを取得し点群レイヤーを構築 ----
+    // ---- GeoTIFFから人口データを取得し点群レイヤーを構築（修正版） ----
     async function loadPopulationPointCloud(lat, lng) {
       updateStatus("LOADING POP DATA...");
       try {
@@ -238,12 +238,16 @@
         // COGを開く
         const tiff = await GeoTIFF.fromUrl(POP_COG_URL);
         const image = await tiff.getImage();
-        const raster = await image.readRasters({ bbox });
 
-        // データは1バンド、Float32
-        const data = raster[0];  // 1次元配列（行優先）
-        const width = image.getWidth();
-        const height = image.getHeight();
+        // ★ 修正：bbox範囲を GRID_SIZE×GRID_SIZE で直接取得
+        const raster = await image.readRasters({
+          bbox,
+          width: GRID_SIZE,
+          height: GRID_SIZE,
+          resampleMethod: 'nearest'
+        });
+
+        const data = raster[0];  // 長さ GRID_SIZE*GRID_SIZE の1次元配列（行優先）
 
         // グリッド点の生成
         const columns = [];
@@ -255,16 +259,13 @@
         let maxPop = 0;
         const cells = [];
 
-        // まず値を集める（将来スケーリングに使う）
+        // 値の収集
         for (let row = 0; row < GRID_SIZE; row++) {
           for (let col = 0; col < GRID_SIZE; col++) {
+            const idx = row * GRID_SIZE + col;  // row-major index
+            const pop = data[idx] || 0;
             const lngPos = startLng + (col + 0.5) * stepLng;
             const latPos = startLat + (row + 0.5) * stepLat;
-            // GeoTIFF内でのピクセル座標をbboxから逆算
-            const pixelX = Math.floor((col + 0.5) * (width / GRID_SIZE));
-            const pixelY = Math.floor((row + 0.5) * (height / GRID_SIZE));
-            const idx = pixelY * width + pixelX;
-            const pop = data[idx] || 0;
             if (pop > maxPop) maxPop = pop;
             cells.push({ lng: lngPos, lat: latPos, pop });
           }
@@ -282,12 +283,15 @@
           });
         });
 
+        // デバッグ用：コンソールに最大人口を出力
+        console.log('Max population in window:', maxPop, 'Number of cells:', cells.length);
+
         // ColumnLayer を更新
         const newLayer = new deck.ColumnLayer({
           id: 'pop-columns',
           data: columns,
           diskResolution: 6,
-          radius: 80,              // 柱の半径（メートル）
+          radius: 200,              // 柱の半径（メートル）※スマホ向けに少し太め
           extruded: true,
           getPosition: d => d.position,
           getElevation: d => d.elevation,
