@@ -3,1509 +3,520 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>周囲1km 人口密度 3D点群</title>
+    <title>統合人流予測 3D + 地図 (Geoapify)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
             --bg: #0a0a14;
             --panel-bg: rgba(10, 10, 30, 0.92);
             --text: #e0e0e0;
-            --accent: #ff6644;
-            --danger: #ff5555;
-            --success: #55cc88;
-            --safe-bottom: env(safe-area-inset-bottom, 0px);
         }
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{
+            background:var(--bg); overflow:hidden;
+            font-family:'Segoe UI','Inter',sans-serif;
+            height:100vh;width:100vw;position:fixed;top:0;left:0;
+            user-select:none;-webkit-user-select:none;
+            -webkit-tap-highlight-color:transparent;
+            touch-action:pan-x pan-y pinch-zoom;
+        }
+        #canvas-container{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;}
+        #info-panel{
+            position:fixed;top:12px;left:10px;z-index:10;
+            background:var(--panel-bg);backdrop-filter:blur(16px);
+            border:1px solid rgba(255,255,255,0.15);border-radius:14px;
+            padding:12px 14px;color:var(--text);font-size:0.8rem;
+            min-width:240px;max-width:calc(100vw - 20px);
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);
+        }
+        #info-panel h2{font-size:0.95rem;margin-bottom:6px;color:#fff;}
+        .stat-row{display:flex;justify-content:space-between;margin:3px 0;}
+        .stat-label{color:#aaa;font-size:0.7rem;}
+        .stat-value{font-weight:600;color:#fff;font-family:monospace;}
+        .bar-container{height:6px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:6px;overflow:hidden;}
+        .bar-fill{height:100%;border-radius:3px;transition:width 1s;background:linear-gradient(90deg,#44cc66,#ff4466);}
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        #legend{
+            position:fixed;bottom:20px;left:10px;z-index:10;
+            background:var(--panel-bg);backdrop-filter:blur(16px);
+            border:1px solid rgba(255,255,255,0.15);border-radius:12px;
+            padding:8px 14px;color:var(--text);font-size:0.7rem;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);
         }
+        #legend .gradient-bar{width:150px;height:10px;border-radius:5px;margin:4px 0;background:linear-gradient(90deg,#33cc55,#cccc33,#dd8822,#cc1133);}
+        .legend-labels{display:flex;justify-content:space-between;color:#aaa;font-size:0.6rem;}
 
-        body {
-            background: var(--bg);
-            overflow: hidden;
-            font-family: 'Inter', 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
-            height: 100vh;
-            width: 100vw;
-            height: -webkit-fill-available;
-            user-select: none;
-            -webkit-user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            -webkit-touch-callout: none;
-            touch-action: pan-x pan-y pinch-zoom;
-            position: fixed;
-            top: 0;
-            left: 0;
+        #status-badge{
+            position:fixed;top:12px;right:10px;z-index:10;
+            background:var(--panel-bg);backdrop-filter:blur(16px);
+            border:1px solid rgba(255,255,255,0.15);border-radius:24px;
+            padding:8px 14px;color:#ccc;font-size:0.75rem;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);
         }
+        .indicator{width:8px;height:8px;border-radius:50%;background:#55cc88;display:inline-block;margin-right:6px;animation:pulse 2s infinite;}
+        .indicator.warning{background:#ffaa33;animation:pulse-warn 1.5s infinite;}
+        @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(85,204,136,0.7)}50%{box-shadow:0 0 0 10px rgba(85,204,136,0)}}
+        @keyframes pulse-warn{0%,100%{box-shadow:0 0 0 0 rgba(255,170,51,0.7)}50%{box-shadow:0 0 0 10px rgba(255,170,51,0)}}
 
-        #canvas-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
+        #minimap-container{
+            position:fixed;bottom:20px;right:10px;z-index:10;
+            width:180px;height:180px;border-radius:12px;overflow:hidden;
+            border:2px solid rgba(255,255,255,0.3);
+            box-shadow:0 8px 32px rgba(0,0,0,0.6);
         }
-
-        canvas {
-            display: block;
+        #minimap{width:100%;height:100%;}
+        @media (max-width:600px){
+            #info-panel{font-size:0.7rem;padding:8px 10px;min-width:180px;}
+            #legend{bottom:10px;padding:5px 10px;}
+            #minimap-container{width:120px;height:120px;bottom:10px;}
         }
-
-        /* --- 情報パネル --- */
-        #info-panel {
-            position: fixed;
-            top: max(12px, env(safe-area-inset-top, 12px));
-            left: max(10px, env(safe-area-inset-left, 10px));
-            z-index: 10;
-            background: var(--panel-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 18px;
-            padding: 14px 18px;
-            color: var(--text);
-            min-width: 230px;
-            max-width: calc(100vw - 20px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-            pointer-events: auto;
-            transition: all 0.2s ease;
+        #api-key-panel{
+            position:fixed;bottom:20px;left:200px;z-index:20;
+            background:var(--panel-bg);padding:8px;border-radius:8px;
+            color:white;font-size:0.6rem;display:flex;gap:5px;align-items:center;
         }
-        #info-panel h2 {
-            font-size: clamp(0.85rem, 2.5vw, 1.1rem);
-            font-weight: 700;
-            margin: 0 0 8px 0;
-            letter-spacing: 0.04em;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        #info-panel h2 .dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: var(--success);
-            animation: pulse-dot 2s infinite;
-            flex-shrink: 0;
-        }
-        @keyframes pulse-dot {
-            0%,
-            100% {
-                box-shadow: 0 0 0 0 rgba(85, 204, 136, 0.7);
-            }
-            50% {
-                box-shadow: 0 0 0 14px rgba(85, 204, 136, 0);
-            }
-        }
-        #info-panel .stat-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            margin: 5px 0;
-            font-size: clamp(0.7rem, 2vw, 0.88rem);
-            gap: 12px;
-        }
-        #info-panel .stat-label {
-            color: #aaa;
-            font-size: clamp(0.65rem, 1.8vw, 0.78rem);
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-        #info-panel .stat-value {
-            font-weight: 700;
-            font-variant-numeric: tabular-nums;
-            font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', 'Menlo', monospace;
-            color: #fff;
-            font-size: clamp(0.8rem, 2.2vw, 1.05rem);
-            text-align: right;
-            letter-spacing: -0.02em;
-        }
-        #info-panel .stat-value.high {
-            color: #ff8877;
-        }
-        #info-panel .stat-value.low {
-            color: #77dd88;
-        }
-        #info-panel .bar-container {
-            margin-top: 10px;
-            height: 7px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        #info-panel .bar-fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 1.2s ease, background 1.2s ease;
-            background: linear-gradient(90deg, #44cc66, #ff4466);
-        }
-
-        /* --- 凡例 --- */
-        #legend {
-            position: fixed;
-            bottom: max(20px, calc(env(safe-area-inset-bottom, 20px) + 8px));
-            left: max(10px, env(safe-area-inset-left, 10px));
-            z-index: 10;
-            background: var(--panel-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            padding: 12px 16px;
-            color: var(--text);
-            font-size: clamp(0.65rem, 1.8vw, 0.76rem);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            pointer-events: auto;
-            max-width: calc(100vw - 20px);
-        }
-        #legend .gradient-bar {
-            width: clamp(130px, 40vw, 200px);
-            height: 12px;
-            border-radius: 6px;
-            margin: 6px 0;
-            background: linear-gradient(90deg, #33cc55, #77cc44, #cccc33, #dd8822, #dd4422, #cc1133);
-        }
-        #legend .legend-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: clamp(0.6rem, 1.6vw, 0.7rem);
-            color: #aaa;
-            width: 100%;
-        }
-
-        /* --- ステータスバッジ --- */
-        #status-badge {
-            position: fixed;
-            top: max(12px, env(safe-area-inset-top, 12px));
-            right: max(10px, env(safe-area-inset-right, 10px));
-            z-index: 10;
-            background: var(--panel-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 24px;
-            padding: 9px 15px;
-            color: #ccc;
-            font-size: clamp(0.7rem, 2vw, 0.82rem);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            pointer-events: auto;
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            white-space: nowrap;
-        }
-        #status-badge .indicator {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background: var(--success);
-            animation: pulse-dot 2s infinite;
-            flex-shrink: 0;
-        }
-        #status-badge .indicator.warning {
-            background: #ffaa33;
-            animation: pulse-dot-warn 1.5s infinite;
-        }
-        @keyframes pulse-dot-warn {
-            0%,
-            100% {
-                box-shadow: 0 0 0 0 rgba(255, 170, 51, 0.7);
-            }
-            50% {
-                box-shadow: 0 0 0 12px rgba(255, 170, 51, 0);
-            }
-        }
-        #countdown {
-            font-weight: 700;
-            color: #fff;
-            min-width: 16px;
-            text-align: center;
-            font-variant-numeric: tabular-nums;
-            font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
-        }
-
-        /* --- 操作ヒント（スマホ向け） --- */
-        #touch-hint {
-            position: fixed;
-            bottom: max(90px, calc(env(safe-area-inset-bottom, 90px) + 60px));
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 10;
-            background: rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border-radius: 20px;
-            padding: 8px 16px;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 0.7rem;
-            pointer-events: none;
-            transition: opacity 1s ease;
-            opacity: 0;
-        }
-        #touch-hint.visible {
-            opacity: 1;
-        }
-
-        /* --- レスポンシブ --- */
-        @media (max-width: 600px) {
-            #info-panel {
-                top: 8px;
-                left: 6px;
-                padding: 10px 14px;
-                min-width: 170px;
-                border-radius: 14px;
-            }
-            #info-panel h2 {
-                font-size: 0.82rem;
-                gap: 5px;
-            }
-            #info-panel h2 .dot {
-                width: 7px;
-                height: 7px;
-            }
-            #info-panel .stat-row {
-                font-size: 0.7rem;
-                margin: 3px 0;
-            }
-            #info-panel .bar-container {
-                height: 5px;
-                margin-top: 6px;
-            }
-            #legend {
-                bottom: 12px;
-                left: 6px;
-                padding: 8px 12px;
-                border-radius: 12px;
-            }
-            #legend .gradient-bar {
-                width: 120px;
-                height: 10px;
-            }
-            #status-badge {
-                top: 8px;
-                right: 6px;
-                padding: 7px 12px;
-                font-size: 0.7rem;
-                border-radius: 20px;
-                gap: 5px;
-            }
-            #status-badge .indicator {
-                width: 7px;
-                height: 7px;
-            }
-        }
-        @media (max-width: 380px) {
-            #info-panel {
-                padding: 8px 10px;
-                min-width: 140px;
-                border-radius: 10px;
-            }
-            #legend {
-                padding: 6px 10px;
-            }
-            #legend .gradient-bar {
-                width: 100px;
-                height: 8px;
-            }
-        }
+        #api-key-input{width:160px;padding:2px;border-radius:4px;border:1px solid #555;background:#222;color:white;}
+        button{padding:2px 6px;border-radius:4px;background:#44a;color:white;border:none;cursor:pointer;}
     </style>
 </head>
 <body>
-
     <div id="canvas-container"></div>
 
     <div id="info-panel">
-        <h2><span class="dot"></span> 人口密度スキャン</h2>
-        <div class="stat-row">
-            <span class="stat-label">📍 現在地</span>
-            <span class="stat-value" id="latlon">取得中...</span>
+        <h2>📊 統合人流予測 (Geoapify)</h2>
+        <div class="stat-row"><span class="stat-label">📍 位置</span><span class="stat-value" id="latlon">取得中</span></div>
+        <div class="stat-row"><span class="stat-label">🕒 曜日/時間</span><span class="stat-value" id="daytime">--</span></div>
+        <div class="stat-row"><span class="stat-label">🌤 天気</span><span class="stat-value" id="weather">--</span></div>
+        <div class="stat-row"><span class="stat-label">🚦 交通量(観測点)</span><span class="stat-value" id="traffic">--</span></div>
+        <div class="stat-row"><span class="stat-label">🎉 イベント施設</span><span class="stat-value" id="event">--</span></div>
+        <div class="stat-row"><span class="stat-label">📰 ニュース</span><span class="stat-value" id="news">--</span></div>
+        <div class="stat-row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.2);padding-top:4px;">
+            <span class="stat-label">📈 統合スコア</span>
+            <span class="stat-value" id="score-val">--</span>
         </div>
-        <div class="stat-row">
-            <span class="stat-label">📐 スキャン範囲</span>
-            <span class="stat-value">半径 1 km</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">👥 平均人口密度</span>
-            <span class="stat-value" id="density-val">--</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">📊 エリア内人口(推計)</span>
-            <span class="stat-value" id="pop-estimate">--</span>
-        </div>
-        <div class="bar-container">
-            <div class="bar-fill" id="density-bar" style="width: 0%;"></div>
-        </div>
+        <div class="bar-container"><div class="bar-fill" id="density-bar" style="width:0%;"></div></div>
     </div>
 
     <div id="legend">
-        <span style="font-weight:600;">人口密度 (人/km²)</span>
+        <span style="font-weight:600;">混雑度 (統合スコア)</span>
         <div class="gradient-bar"></div>
-        <div class="legend-labels">
-            <span>低密度</span><span>中密度</span><span>高密度</span>
-        </div>
+        <div class="legend-labels"><span>低</span><span>中</span><span>高</span></div>
     </div>
 
     <div id="status-badge">
         <span class="indicator" id="status-indicator"></span>
-        <span>更新 <span id="indicator" id="status-indicator"></span>
-        <span>更新 <span id="count="countdown">down">10</10</span>span>s</s</spanspan>
-    </>
+        <span>次回更新 <span id="countdown">28:48</span></span>
     </div>
 
-    <div iddiv>
+    <div id="minimap-container">
+        <div id="minimap"></div>
+    </div>
 
-    <div id="touch="touch-hint-hint">">👆 👆 スワスワイプイプで回で回転 転 ／ ／ ピンチピンチでズでズーム</ーム</divdiv>
+    <div id="api-key-panel">
+        <span>🔑 Geoapify APIキー</span>
+        <input type="text" id="api-key-input" placeholder="キーを入力して有効化">
+        <button id="api-key-apply">適用</button>
+    </div>
 
-   >
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    <script type <script type="import="importmapmap">
-       ">
-        {
-            " {
-            "importsimports":": {
-                " {
-                "three":three": "https "https://unpkg://unpkg.com/three@.com/three@0.0.160.160.0/build0/build/three/three.module.js.module.js",
-               ",
-                "three "three/addons/addons/":/": "https "https://un://unpkgpkg.com/three@0..com/three@0.160.160.00/ex/examples/jamples/jsmsm/"
-           /"
+        // 設定
+        const UPDATE_INTERVAL = 28.8 * 60 * 1000; // 28.8分 (1728000ミリ秒)
+        const RADIUS_M = 1000;
+        const DENSITY_MAX = 100;
+        const FALLBACK_GRID_RES = 30;
+        const MAX_POINTS = 300;
+        const isMobile = window.innerWidth < 768;
+
+        // DOM
+        const container = document.getElementById('canvas-container');
+        const elLatLon = document.getElementById('latlon');
+        const elDaytime = document.getElementById('daytime');
+        const elWeather = document.getElementById('weather');
+        const elTraffic = document.getElementById('traffic');
+        const elEvent = document.getElementById('event');
+        const elNews = document.getElementById('news');
+        const elScore = document.getElementById('score-val');
+        const elDensityBar = document.getElementById('density-bar');
+        const elCountdown = document.getElementById('countdown');
+        const elStatusIndicator = document.getElementById('status-indicator');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const apiKeyApply = document.getElementById('api-key-apply');
+
+        let currentLat = 35.6812, currentLon = 139.7671;
+        let geoapifyKey = ''; // Geoapify APIキー
+
+        // 位置情報
+        function getPosition() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) return reject(new Error('非対応'));
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                    enableHighAccuracy: true, timeout: 8000, maximumAge: 30000
+                });
+            });
+        }
+
+        // 因子1: 曜日・時間帯
+        function getDayTimeFactor() {
+            const now = new Date();
+            const day = now.getDay();
+            const hour = now.getHours();
+            let factor = 0.5;
+            if (day >= 1 && day <= 5) {
+                if (hour >= 7 && hour <= 9) factor = 0.95;
+                else if (hour >= 17 && hour <= 19) factor = 0.9;
+                else if (hour >= 10 && hour <= 16) factor = 0.6;
+                else if (hour >= 20 && hour <= 23) factor = 0.7;
+                else factor = 0.2;
+            } else {
+                if (hour >= 10 && hour <= 18) factor = 0.85;
+                else if (hour >= 19 && hour <= 22) factor = 0.75;
+                else factor = 0.35;
+            }
+            const days = ['日','月','火','水','木','金','土'];
+            elDaytime.textContent = `${days[day]}曜 ${hour}時 (${factor.toFixed(2)})`;
+            return factor;
+        }
+
+        // 因子2: 天気 (Open-Meteo)
+        async function getWeatherFactor(lat, lon) {
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const code = data.current_weather.weathercode;
+                const temp = data.current_weather.temperature;
+                let factor = 0.8;
+                let desc = '';
+                if (code === 0) { factor = 1.0; desc = '快晴'; }
+                else if (code <= 3) { factor = 0.9; desc = '曇り'; }
+                else if (code <= 48) { factor = 0.7; desc = '霧'; }
+                else if (code <= 67) { factor = 0.4; desc = '雨'; }
+                else if (code <= 77) { factor = 0.25; desc = '雪'; }
+                else { factor = 0.6; desc = '他'; }
+                if (temp < 5) factor *= 0.7;
+                else if (temp > 35) factor *= 0.8;
+                elWeather.textContent = `${desc} ${temp}℃ (${factor.toFixed(2)})`;
+                return factor;
+            } catch (e) {
+                elWeather.textContent = '取得失敗';
+                return 0.5;
             }
         }
+
+        // 因子3: 交通量 (xROAD)
+        async function fetchTrafficPoints(lat, lng) {
+            const dLat = 1.0 / 111.32;
+            const dLon = 1.0 / (111.32 * Math.cos(lat * Math.PI/180));
+            const bbox = [lng-dLon, lat-dLat, lng+dLon, lat+dLat].map(v=>v.toFixed(6)).join(',');
+            const now = new Date();
+            const ft = new Date(now.getTime() - 25*60000);
+            const pad = n=>String(n).padStart(2,'0');
+            const y=ft.getFullYear(), m=pad(ft.getMonth()+1), d=pad(ft.getDate()), h=pad(ft.getHours()), min=pad(Math.floor(ft.getMinutes()/5)*5);
+            const timeCode = `${y}${m}${d}${h}${min}`;
+            const timeCodeEnd = `${y}${m}${d}${h}${pad(parseInt(min)+5)}`;
+            const url = `https://api.jartic-open-traffic.org/geoserver?service=WFS&version=2.0.0&request=GetFeature&typeNames=t_travospublic_measure_5m&srsName=EPSG:4326&outputFormat=application/json&cql_filter=BBOX(ジオメトリ,${bbox},'EPSG:4326') AND 時間コード>=${timeCode} AND 時間コード<=${timeCodeEnd} AND 道路種別='3'`;
+            const res = await fetch(url);
+            if (!res.ok) return [];
+            const data = await res.json();
+            if (!data.features) return [];
+            return data.features.map(f=>{
+                const p = f.properties;
+                const vol = Math.min(parseInt(p['上り・小型交通量']||0) + parseInt(p['下り・小型交通量']||0), DENSITY_MAX);
+                return { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], volume: vol };
+            });
         }
-    </ }
-    </scriptscript>
 
-   >
+        async function getTrafficFactor(lat, lon) {
+            try {
+                const points = await fetchTrafficPoints(lat, lon);
+                if (points.length === 0) {
+                    elTraffic.textContent = '観測点なし';
+                    return { factor: 0.5, points: [] };
+                }
+                const avg = points.reduce((s,p)=>s+p.volume,0)/points.length;
+                const factor = Math.min(1, avg / DENSITY_MAX);
+                elTraffic.textContent = `${points.length}地点 平均${Math.round(avg)}台/5分 (${factor.toFixed(2)})`;
+                return { factor, points };
+            } catch (e) {
+                elTraffic.textContent = 'APIエラー';
+                return { factor: 0.5, points: [] };
+            }
+        }
 
-    <script type <script type="module="module">
-       ">
-        import * import * as THREE as THREE from 'three from 'three';
-        import';
-        import { Orbit { OrbitControls }Controls } from ' from 'three/addthree/addons/ons/controls/controls/OrbitOrbitControls.jsControls.js';
+        // 因子4: イベント (Geoapify Places API)
+        async function getEventFactor(lat, lon) {
+            if (!geoapifyKey) {
+                elEvent.textContent = 'キー未設定';
+                return 0.3;
+            }
+            try {
+                // イベント会場とみなせるカテゴリ: コンベンションセンター、スタジアム、劇場
+                const categories = 'building.convention_center,entertainment.stadium,entertainment.theatre';
+                const radius = 1000;
+                const url = `https://api.geoapify.com/v2/places?categories=${encodeURIComponent(categories)}&filter=circle:${lon},${lat},${radius}&limit=50&apiKey=${geoapifyKey}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const count = data.features ? data.features.length : 0;
+                const factor = Math.min(1, count * 0.25 + 0.3);
+                elEvent.textContent = `${count}施設 (${factor.toFixed(2)})`;
+                return factor;
+            } catch (e) {
+                elEvent.textContent = 'エラー';
+                return 0.3;
+            }
+        }
 
-       ';
+        // 因子5: ニュース (GDELT)
+        async function getNewsFactor() {
+            try {
+                const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=japan&mode=artlist&format=json&timespan=24h&maxrecords=20`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const count = data.articles ? data.articles.length : 0;
+                const factor = Math.min(1, count * 0.1 + 0.2);
+                elNews.textContent = `${count}記事 (${factor.toFixed(2)})`;
+                return factor;
+            } catch (e) {
+                elNews.textContent = '取得失敗';
+                return 0.4;
+            }
+        }
 
-        // ───────────────── // ───────────────────────────────────────────────────────────
-        //
-        //  設定  設定
-        // ──────────────────────────────────────
-        const
-        // ──────────────────────────────────────
-        const UPDATE_IN UPDATE_INTERVALTERVAL_MS_MS =  = 10_10_000000;
-        //;
-        // ★ ★ 点 点群密度群密度を向上を向上:: 36 36××36 =36 = 1 1,296,296点（点（約57約57m間m間隔隔）
-        const）
-        const GRID GRID_RESOL_RESOLUTION =UTION = 36 36;
-;
-        const SC        const SCAN_RAN_RADIUSADIUS_M =_M = 100 10000;
-        const;
-        const GRID GRID_SPAC_SPACING =ING = (SC (SCAN_RAN_RADIUSADIUS_M *_M * 2 2) /) / (GR (GRID_RESID_RESOLUTIONOLUTION -  - 11);
+        // 統合スコア計算
+        function computeScore(day, weather, traffic, event, news) {
+            return day*0.25 + weather*0.2 + traffic*0.35 + event*0.1 + news*0.1;
+        }
 
-        const);
+        // --- ミニマップ (Leaflet) ---
+        let minimap, userMarker, trafficLayer;
+        function initMinimap() {
+            minimap = L.map('minimap', { attributionControl:false, zoomControl:false, dragging:false }).setView([currentLat, currentLon], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(minimap);
+            userMarker = L.circleMarker([currentLat, currentLon], { radius:6, color:'red', fillColor:'#f03', fillOpacity:0.8 }).addTo(minimap);
+            trafficLayer = L.layerGroup().addTo(minimap);
+        }
+        function updateMinimap(lat, lon, points) {
+            if (!minimap) initMinimap();
+            minimap.setView([lat, lon], 14);
+            userMarker.setLatLng([lat, lon]);
+            trafficLayer.clearLayers();
+            points.forEach(p => {
+                L.circleMarker([p.lat, p.lon], { radius:4, color:'#3388ff', fillColor:'#3388ff', fillOpacity:0.7 })
+                 .bindPopup(`交通量: ${p.volume}台/5分`).addTo(trafficLayer);
+            });
+        }
 
-        const DENS DENSITY_MINITY_MIN =  = 5050;
-        const;
-        const DENS DENSITY_MAXITY_MAX =  = 1500015000;
+        // --- Three.js シーン ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a18);
+        scene.fog = new THREE.Fog(0x0a0a18, 600, 3500);
+        const camera = new THREE.PerspectiveCamera(isMobile?55:50, container.clientWidth/container.clientHeight, 10, 6000);
+        camera.position.set(1100,850,1300); camera.lookAt(0,0,0);
+        const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
 
-       ;
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0,80,0); controls.enableDamping=true; controls.dampingFactor=0.15;
+        controls.minDistance=150; controls.maxDistance=3500; controls.update();
 
-        //  // スマホスマホ判定
-       判定 const is
-        const isMobile =Mobile = /Android /Android|iPhone|iPhone|iPad|iPad|i|iPod|Pod|webOSwebOS/i.test/i.test(navig(navigator.userator.userAgent)Agent) ||
-            ||
-            (window (window.innerWidth.innerWidth < 768 && ' < 768 && 'ontontouchstartouchstart' in' in window);
+        scene.add(new THREE.AmbientLight(0x334466, 2.5));
+        scene.add(new THREE.HemisphereLight(0x8899cc, 0x223344, 2));
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(RADIUS_M*2.4,RADIUS_M*2.4),
+            new THREE.MeshStandardMaterial({color:0x1a1a3a, roughness:0.85, metalness:0.1, transparent:true, opacity:0.5}));
+        ground.rotation.x=-Math.PI/2; ground.position.y=-15; scene.add(ground);
+        const gridHelper = new THREE.PolarGridHelper(RADIUS_M,32,16,64,0x334466,0x223355);
+        gridHelper.position.y=-14; scene.add(gridHelper);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(RADIUS_M,6,16,100),
+            new THREE.MeshStandardMaterial({color:0x4488cc, roughness:0.4, metalness:0.6, emissive:0x112233}));
+        ring.rotation.x=-Math.PI/2; ring.position.y=-12; scene.add(ring);
 
-        // window);
+        const markerGroup = new THREE.Group();
+        markerGroup.add(new THREE.Mesh(new THREE.SphereGeometry(20,32,32),
+            new THREE.MeshStandardMaterial({color:0xff4466, roughness:0.2, metalness:0.3, emissive:0x441111})));
+        const pulse = new THREE.Mesh(new THREE.TorusGeometry(26,4,16,48),
+            new THREE.MeshStandardMaterial({color:0xff6677, roughness:0.3, metalness:0.4, emissive:0x330000, transparent:true, opacity:0.7}));
+        pulse.rotation.x=-Math.PI/2; pulse.name='pulseRing'; markerGroup.add(pulse);
+        markerGroup.position.y=0; scene.add(markerGroup);
 
-        // ─ ──────────────────────────────────────────────────────────────────────
-        //  DOM─────
-        //  DOM
-        // ─
-        // ───────────────────────────────────────────────────────────────────────────
-       
-        const container const container = document = document.getElementById('.getElementById('canvas-containercanvas-container');
-       ');
-        const el const elLatLLatLon =on = document.getElementById document.getElementById('lat('latlonlon');
-        const');
-        const elD elDensityValensityVal = document = document.getElementById('.getElementById('density-val');
-        const elPopEstimate = document.getElementById('pop-estimate');
-        const elDensityBar = document.getElementById('density-bar');
-        const elCountdown = document.getElementById('countdown');
-        const elStatusIndicator = document.getElementById('status-indicator');
-        const elTouchHint = document.getElementById('touch-hint');
+        // 点群バッファ
+        const pointGeo = new THREE.BufferGeometry();
+        const posArr = new Float32Array(MAX_POINTS*3);
+        const colArr = new Float32Array(MAX_POINTS*3);
+        pointGeo.setAttribute('position', new THREE.BufferAttribute(posArr,3));
+        pointGeo.setAttribute('color', new THREE.BufferAttribute(colArr,3));
+        pointGeo.setDrawRange(0,0);
+        const spriteTex = (()=>{
+            const c=document.createElement('canvas'); c.width=64;c.height=64;
+            const ctx=c.getContext('2d'); const g=ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.3,'rgba(255,255,255,0.6)'); g.addColorStop(1,'rgba(255,255,255,0)');
+            ctx.fillStyle=g; ctx.fillRect(0,0,64,64);
+            return new THREE.CanvasTexture(c);
+        })();
+        const pointMat = new THREE.PointsMaterial({size:isMobile?20:28, map:spriteTex, vertexColors:true, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:true, transparent:true, opacity:0.85});
+        const pointCloud = new THREE.Points(pointGeo, pointMat);
+        scene.add(pointCloud);
 
-        // ──────────────────────────────────────
-        //  シミュレーション: 人口密度データ
-        // ──────────────────────────────────────
-        async function fetchPopulationDensity(latitude, longitude) {
+        function densityToColor(d){ const t=Math.min(1,d/DENSITY_MAX); return new THREE.Color().setHSL((1-t)*0.33,0.8,0.4+t*0.4); }
+        function densityToHeight(d){ const t=Math.min(1,d/DENSITY_MAX); return 8 + Math.pow(t,1.5)*300; }
+
+        function updatePointsFromReal(points) {
+            const count = Math.min(points.length, MAX_POINTS);
+            for(let i=0;i<count;i++){
+                const p = points[i];
+                const dx = (p.lon - currentLon)*111320*Math.cos(currentLat*Math.PI/180);
+                const dy = (p.lat - currentLat)*111320;
+                const h = densityToHeight(p.volume);
+                const col = densityToColor(p.volume);
+                posArr[i*3]=dx; posArr[i*3+1]=h/2; posArr[i*3+2]=dy;
+                colArr[i*3]=col.r; colArr[i*3+1]=col.g; colArr[i*3+2]=col.b;
+            }
+            for(let i=count;i<MAX_POINTS;i++) posArr[i*3+1] = -999;
+            pointGeo.attributes.position.needsUpdate = true;
+            pointGeo.attributes.color.needsUpdate = true;
+            pointGeo.setDrawRange(0, count);
+            pointGeo.computeBoundingSphere();
+            return count;
+        }
+
+        function generateSimGrid(score) {
             const cells = [];
-           density-val');
-        const elPopEstimate = document.getElementById('pop-estimate');
-        const elDensityBar = document.getElementById('density-bar');
-        const elCountdown = document.getElementById('countdown');
-        const elStatusIndicator = document.getElementById('status-indicator');
-        const elTouchHint = document.getElementById('touch-hint');
-
-        // ──────────────────────────────────────
-        //  シミュレーション: 人口密度データ
-        // ──────────────────────────────────────
-        async function fetchPopulationDensity(latitude, longitude) {
-            const cells = [];
-            const half const halfGrid =Grid = (GRID_RESOLUTION - 1) (GRID_RESOLUTION - 1) /  / 22;
-            const;
-            const seedBase seedBase = Math = Math.sin(l.sin(latitude *atitude * 127 127.1 + longitude.1 + longitude *  * 311.311.7)7) *  * 4375843758.545.54533;
-            const;
-            const seed = seed = seedBase seedBase - Math - Math.floor(.floor(seedBaseseedBase);
-
-           );
-
-            for ( for (let rowlet row =  = 0;0; row row < GRID < GRID_RESOL_RESOLUTION;UTION; row++) row++) {
-                {
-                for ( for (let collet col =  = 0;0; col col < GR < GRIDID_RESOL_RESOLUTION;UTION; col++) col++) {
-                    {
-                    const offset const offsetX =X = (col (col - half - halfGrid) * GRID_SPGrid) * GRID_SPACINGACING;
-                   ;
-                    const offset const offsetY =Y = (row (row - halfGrid) * GR - halfGrid) * GRID_SPACINGID_SP;
-
-                    const dACING;
-
-                    const dLat =Lat = offsetY offsetY / 111_000 / 111_000;
-                    const;
-                    const dLon = offsetX dLon = offsetX / ( / (111_000 * Math.cos(latitude111_000 * Math.cos(latitude * Math * Math.PI.PI / 180 / 180));
-                    const cellLat = latitude + dLat;
-                    const));
-                    const cellLat = latitude + dLat;
-                    const cellL cellLon =on = longitude + longitude + dL dLonon;
-
-                    const;
-
-                    const fx = fx = cellL cellLon * 180;
-                    const fyon * 180;
-                    const fy = cell = cellLat *Lat * 140 140;
-                   ;
-                    const wave const wave1 =1 = Math.sin Math.sin(fx(fx *  * 0.0.7 +7 + seed * seed * 10 10) *) * Math.cos Math.cos(fy(fy *  * 0.0.6 + seed * 7);
-                    const wave6 + seed * 7);
-                    const wave2 =2 = Math.sin Math.sin(fx(fx *  * 1.1.9 -9 - fy * fy * 1 1.1.1 + seed + seed *  * 3)3) *  * 0.0.55;
-                    const;
-                    const wave3 wave3 = Math.cos(f = Math.cos(fx * 3x * 3.3.3 + fy + fy * 2 * 2.7 +.7 + seed * 5) * 0.3;
-                    const wave seed * 5) * 0.3;
-                    const wave4 = Math.sin4 = Math.sin(fx(fx *  * 5.5.1 -1 - fy * fy * 4 4.3.3) *) * 0.15 0.15;
-
-                   ;
-
-                    const dist const distFromCenter = Math.sqrt(FromCenter = Math.sqrt(offsetX * offsetX + offsetYoffsetX * offsetX + offsetY * offset * offsetY)Y) / SC / SCAN_RAN_RADIUSADIUS_M_M;
-                    const;
-                    const gaussian gaussian = Math = Math.exp(-.exp(-distFromCenter * distFromdistFromCenter * distFromCenter *Center * 2 2.5.5);
-                   );
-                    const noise const noise = wave = wave1 +1 + wave2 wave2 + wave3 + + wave3 + wave4 wave4;
-
-                   ;
-
-                    let raw let raw = gaussian * 0 = gaussian * 0.55.55 + ( + (noisenoise +  + 0.0.5) * 5) * 0.0.4545;
-                    raw;
-                    raw = Math = Math.max(.max(0,0, Math.min Math.min(1(1, raw, raw));
-                   ));
-                    const shaped const shaped = Math = Math.pow(raw.pow(raw, , 1.1.44);
-);
-                    const                    const density = density = DENS DENSITY_MINITY_MIN + shaped + shaped * ( * (DENSDENSITY_MAXITY_MAX - D - DENSITYENSITY_MIN_MIN);
-
-                    cells);
-
-                    cells.push.push({
-                        lat({
-                        lat: cell: cellLatLat,
-                        lon,
-                        lon: cell: cellLonLon,
-                        density:,
-                        density: Math.round Math.round(density(density),
-                       ),
-                        relX relX: offset: offsetXX,
-                        rel,
-                        relZ:Z: offsetY offsetY,
-                   ,
-                    });
-                });
+            const half = (FALLBACK_GRID_RES-1)/2;
+            const spacing = (RADIUS_M*2)/(FALLBACK_GRID_RES-1);
+            for(let r=0;r<FALLBACK_GRID_RES;r++){
+                for(let c=0;c<FALLBACK_GRID_RES;c++){
+                    const x = (c-half)*spacing, z = (r-half)*spacing;
+                    const dist = Math.sqrt(x*x+z*z)/RADIUS_M;
+                    const density = DENSITY_MAX * (score * Math.exp(-dist*dist*2.5) + 0.1*Math.random());
+                    cells.push({ relX:x, relZ:z, density: Math.min(DENSITY_MAX, density) });
                 }
             }
-            }
-            return cells }
             return cells;
         }
 
-       ;
-        }
-
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        //
-        //  Three  Three.js .js セセットアップットアップ
-       
-        // // ───────────────── ──────────────────────────────────────
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0a0a18);
-        scene.fog = new THREE.Fog(0x0a0a18, 600, 3500);
-
-        const camera = new THREE.PerspectiveCamera(
-            isMobile ? 55 : 50,
-            container.clientWidth / container.clientHeight,
-            10,
-            6000
-        );
-        camera.position.set(1100, 850, 1300);
-        camera.lookAt(0, 0, 0);
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-        renderer.setSize(container.clientWidth, container.clientHeight);
-        // スマホではピクセル比を抑えてパフォーマンス確保
-        render─────────────────────
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0a0a18);
-        scene.fog = new THREE.Fog(0x0a0a18, 600, 3500);
-
-        const camera = new THREE.PerspectiveCamera(
-            isMobile ? 55 : 50,
-            container.clientWidth / container.clientHeight,
-            10,
-            6000
-        );
-        camera.position.set(1100, 850, 1300);
-        camera.lookAt(0, 0, 0);
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-        renderer.setSize(container.clientWidth, container.clientHeight);
-        // スマホではピクセル比を抑えてパフォーマンス確保
-        renderer.setPixelRatioer.setPixelRatio(Math.min(Math.min(window.devicePixelRatio, isMobile(window.devicePixelRatio, isMobile ?  ? 2 :2 : 2 2.5.5));
-       ));
-        renderer renderer.shadow.shadowMap.enMap.enabled = !isMobile; // スマホではシャドウをオフにして軽量化
-        if (renderer.shadowMap.enabled) {
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        }
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.1;
-        container.appendChild(renderer.domElement);
-
-        // OrbitControlsabled = !isMobile; // スマホではシャドウをオフにして軽量化
-        if (renderer.shadowMap.enabled) {
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        }
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.1;
-        container.appendChild(renderer.domElement);
-
-        // OrbitControls
-       
-        const controls = new const controls = new OrbitControls(camera OrbitControls(camera, renderer.d, renderer.domElementomElement);
-       );
-        controls.target controls.target.set(.set(0,0, 80 80, , 00);
-        controls);
-        controls.enable.enableDamping = trueDamping = true;
-       ;
-        controls.d controls.dampingFactorampingFactor =  = 0.150.15;
-        controls.minDistance;
-        controls = 150.minDistance = 150;
-        controls;
-        controls.maxDistance = 3500.maxDistance = 3500;
-       ;
-        controls.max controls.maxPolarAngle =PolarAngle = Math Math.PI * 0.48;
-        controls.minPolarAngle = 0.PI * 0.48;
-        controls.minPolarAngle = 0.1.1;
-        // ;
-        // スマホでは回スマホでは回転感転感度度をを調整調整
-        controls
-        controls.rotate.rotateSpeed =Speed = isMobile isMobile ? 0. ? 0.6 :6 : 0 0.8.8;
-       ;
-        controls.t controls.touches = {
-            ONEouches = {
-            ONE: THREE: THREE.TOU.TOUCH.CH.ROTATEROTATE,
-            TWO,
-            TWO: THREE: THREE.TOUCH.D.TOUCH.DOLLOLLYY_P_PANAN
-       
-        };
-        controls };
-        controls.update.update();
-
-        //();
-
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        //  ライティ //  ライティングング
-        //
-        // ───────────────────────────────── ───────────────────────────────────────────
-       
-        const ambient const ambientLight =Light = new THREE.Amb new THREE.AmbientLightientLight(0(0x334x334466,466, 2 2.8.8);
-       );
-        scene.add scene.add(amb(ambientLightientLight);
-       );
-        const he const hemiLightmiLight = new = new THREE.Hemisphere THREE.HLight(emisphereLight(0x0x88998899cc,cc, 0 0x223x223344, 2344, 2.0.0);
-       );
-        scene.add(hem scene.add(hemiLightiLight);
-
-        if (!isMobile);
-
-        if (!)isMobile) {
-            const {
-            const dirLight = new dirLight = new THREE.D THREE.DirectionalLightirectionalLight(0(0xffeedxffeedd,d, 5 5);
-           );
-            dirLight dirLight.position.set.position.set(150(1500,0, 200 2000,0, 800 800);
-           );
-            dirLight dirLight.cast.castShadow =Shadow = true true;
-            dirLight.shadow.mapSize.width;
-            dirLight.shadow.mapSize.width =  = 10241024;
-           ;
-            dirLight dirLight.shadow.shadow.mapSize.mapSize.height =.height = 102 10244;
-            dir;
-            dirLight.shLight.shadow.cadow.camera.namera.near =ear = 10 10;
-           ;
-            dirLight dirLight.shadow.shadow.camera.camera.far.far =  = 60006000;
-           ;
-            dirLight dirLight.shadow.shadow.camera.camera.left =.left = -200 -20000;
-            dir;
-            dirLight.shLight.shadow.cadow.camera.rightamera.right = =  20002000;
-           ;
-            dirLight dirLight.shadow.shadow.camera.camera.top =.top = 200 2000;
-            dir0Light.sh;
-            dirLight.shadow.cadow.camera.bottom = -amera.bottom = -20002000;
-           ;
-            dirLight dirLight.shadow.shadow.bias.bias = - = -0.0.00040004;
-           ;
-            scene.add scene.add(dirLight);
-       (dirLight);
-        }
-
-        }
-
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        //
-        //  地面・  地面・グリグリッドッド
-        //
-        // ───────────────────────────────── ───────────────────────────────────────────
-       
-        const ground const groundGeo = new THREEGeo =.Plane new THREE.PlaneGeometry(Geometry(SCANSCAN_RADI_RADIUS_MUS_M *  * 2.2.4,4, SCAN SCAN_RADI_RADIUS_MUS_M *  * 2.2.44);
-        const);
-        const groundMat = new groundMat = new THREE.M THREE.MeshStandardeshStandardMaterial({
-            colorMaterial({
-            color: : 0x0x1a1a1a1a3a3a,
-           ,
-            roughness: roughness: 0 0.85.85,
-           ,
-            metalness metalness: 0.: 0.11,
-            transparent,
-            transparent: true: true,
-           ,
-            opacity: opacity: 0 0.5.5,
-       ,
-        });
-        });
-        const ground const ground = new = new THREE.Mesh( THREE.Mesh(groundGeogroundGeo, ground, groundMatMat);
-        ground);
-        ground.rotation.rotation.x =.x = -Math -Math.PI.PI / 2;
-        ground / 2;
-        ground.position.y.position.y = - = -1515;
-        ground;
-        ground.receive.receiveShadow =Shadow = true;
-        scene.add(ground);
-
-        const gridHelper = new THREE.PolarGridHelper(SCAN_RADIUS_M, 32, 16, 64, 0x334466, 0x223355);
-        gridHelper.position.y = -14;
-        scene.add(gridHelper);
-
-        const ringGeo = new THREE.TorusGeometry(SCAN_RADIUS_M, 6, 16, 100 true;
-        scene.add(ground);
-
-        const gridHelper = new THREE.PolarGridHelper(SCAN_RADIUS_M, 32, 16, 64, 0x334466, 0x223355);
-        gridHelper.position.y = -14;
-        scene.add(gridHelper);
-
-        const ringGeo = new THREE.TorusGeometry(SCAN_RADIUS_M, 6, 16, 100);
-        const ringMat);
-        const ringMat = new = new THREE.M THREE.MeshStandardeshStandardMaterialMaterial({
-            color({
-            color: : 0x0x44884488cccc,
-            roughness,
-            roughness: : 0.0.44,
-            metal,
-            metalness:ness: 0 0.6.6,
-           ,
-            emissive emissive: : 0x0x112233,
-           112233,
-            emissive emissiveIntensityIntensity: : 0.0.55,
-       ,
-        });
-        });
-        const ring = const new THREE ring = new THREE.Mesh.Mesh(ring(ringGeo,Geo, ring ringMatMat);
-       );
-        ring. ring.rotation.xrotation.x = - = -Math.PMath.PI /I / 2 2;
-       ;
-        ring.position ring.position.y =.y = -12 -12;
-       ;
-        ring.re ring.receiveShadowceiveShadow = true = true;
-       ;
-        ring.c ring.castShadowastShadow = ! = !isMobileisMobile;
-       ;
-        scene.add scene.add(ring);
-
-       (ring //);
-
-        // ───────────────── ───────────────────────────────────────────────────────────
-       
-        // //  ユ  ユーザー位置マーザー位置マーカーーカー
-       
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        const
-        const markerGroup markerGroup = new = new THREE.Group THREE.Group();
-       ();
-        const marker const markerSphereGeoSphereGeo = new = new THREE.S THREE.SpherephereGeometry(20, Geometry(20, 32, 32, 3232);
-        const);
-        const markerSphere markerSphereMat =Mat = new THREE new THREE.Mesh.MeshStandardMaterialStandardMaterial({
-            color:({
-            color: 0 0xff446xff44666,
-            roughness: 0.2,
-            metalness: 0.3,
-            emissive: 0x441111,
-            emissiveIntensity,
-            roughness: 0.2,
-            metalness: 0.3,
-            emissive: 0x441111,
-            emissiveIntensity: : 0.80.8,
-       ,
-        });
-        const });
-        const markerSphere markerSphere = new = new THREE.M THREE.Mesh(mesh(markerSpherearkerSphereGeo,Geo, markerSphere markerSphereMat);
-        markerSphere.position.y = 25;
-        markerSphereMat);
-        markerSphere.position.y = 25;
-        markerSphere.cast.castShadow =Shadow = !isMobile !isMobile;
-        marker;
-        markerGroup.addGroup.add(markerSphere(markerSphere);
-
-        const pulseRing);
-
-        const pulseRingGeo =Geo = new THREE.Torus new THREEGeometry(.TorusGeometry(26,26, 4 4, , 16,16, 48 48);
-       );
-        const pulse const pulseRingMat = newRingMat = new THREE.M THREE.MeshStandardMaterial({
-            coloreshStandardMaterial({
-            color: : 0xff0xff66776677,
-            roughness: 0,
-            roughness: 0.3,
-            metalness.3,
-            metalness: : 0.0.44,
-            emiss,
-            emissive:ive: 0 0x330x330000000,
-            emiss,
-            emissiveIntiveIntensity:ensity: 0 0.9,
-           .9 transparent:,
-            transparent: true true,
-            opacity,
-            opacity: 0.: 0.88,
-       ,
-        });
-        const pulseRing });
-        const pulseRing = new = new THREE.M THREE.Mesh(pesh(pulseRingulseRingGeo,Geo, pulseRing pulseRingMatMat);
-        pulseRing.);
-        pulseRing.rotation.xrotation.x = - = -Math.PMath.PI / 2I /;
-        2;
-        pulseRing pulseRing.position.position.y = .y = 2525;
-        pulse;
-        pulseRing.nameRing.name = ' = 'pulsepulseRing';
-        markerGroup.add(pulseRing';
-        markerGroup.add(pulseRingRing);
-
-        const);
-
-        const pillarGeo pillarGeo = new = new THREE.C THREE.CylinderylinderGeometry(Geometry(5, 55, 5, , 55,55, 16 16);
-       );
-        const pillar const pillarMat =Mat = new THREE new THREE.MeshStandardMaterial.MeshStandardMaterial({
-           ({
-            color: color: 0 0xff5566xff5566,
-            roughness,
-            roughness: : 0.0.33,
-            metal,
-            metalness:ness: 0 0.2.2,
-           ,
-            emissive emissive: : 0x0x220000220000,
-            emissive,
-            emissiveIntensityIntensity: : 0.0.6,
-            transparent6,
-            transparent: true,
-           : true,
-            opacity: opacity: 0 0.45.45,
-       ,
-        });
-        });
-        const pillar = new const pillar = new THREE.M THREE.Mesh(pesh(pillarGeoillarGeo, pillar, pillarMat);
-        pillarMat);
-        pillar.position.y.position.y = -5 = -5;
-        pillar;
-        pillar.cast.castShadow =Shadow = !is !isMobileMobile;
-       ;
-        marker markerGroup.addGroup.add(pillar(pillar);
-        marker);
-        markerGroup.positionGroup.position.set(.set(0, 00, 0, , 00);
-        scene);
-        scene.add(m.add(markerGroup);
-
-       arkerGroup);
-
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        //
-        //  点  点群群
-        //
-        // ───────────────────────────────── ───────────────────────────────────────────
-       
-        const totalPoints = const totalPoints = GRID GRID_RESOL_RESOLUTION *UTION * GRID_RESOL GRID_RESOLUTIONUTION;
-        const;
-        const pointPos pointPositions = new Floatitions = new Float32Array32Array(totalPoints(totalPoints *  * 3);
-        const pointColors = new Float32Array(totalPoints *3);
-        const pointColors = new Float32Array(totalPoints * 3 3);
-
-       );
-
-        const point const pointGeometry =Geometry = new THREE new THREE.Buffer.BufferGeometryGeometry();
-        point();
-        pointGeometry.setGeometry.setAttribute('Attribute('position',position', new THREE new THREE.Buffer.BufferAttribute(pointAttribute(pointPositionsPositions, , 33));
-        point));
-        pointGeometry.setAttribute('Geometry.setAttribute('color', new THREEcolor', new THREE.B.BufferufferAttribute(pointAttribute(pointColors,Colors, 3 3));
-
-       ));
-
-        //  // ポイントサイズポイントサイズ：：スマホスマホではやではやや小さや小さめにしてめにして視認視認性と性とパフォパフォーマンスーマンスを両を両立立
-        const
-        const basePoint basePointSize =Size = isMobile isMobile ?  ? 22 :22 : 30 30;
-        const spriteTexture = createCircleTexture;
-        const spriteTexture = createCircleTexture();
-        const();
-        const pointMaterial pointMaterial = new = new THREE.P THREE.PointsMaterial({
-           ointsMaterial({
-            size: size: basePoint basePointSizeSize,
-            map,
-            map: spriteTexture,
-            vertex: spriteTexture,
-            vertexColors:Colors: true true,
-            blending,
-            blending: THREE: THREE.Additive.AdditiveBlendingBlending,
-           ,
-            depthWrite: false depthWrite,
-           : false,
-            depthTest: true depthTest: true,
-           ,
-            transparent: transparent: true,
-            opacity true,
-            opacity: : 0.0.8888,
-            size,
-            sizeAttenAttenuation:uation: true true,
-        });
-
-        const,
-        });
-
-        const pointCloud pointCloud = new = new THREE.P THREE.Points(pointoints(pointGeometry,Geometry, pointMaterial pointMaterial);
-       );
-        pointCloud pointCloud.position.y.position.y =  = 00;
-        point;
-        pointCloud.receiveShadowCloud.re = true;
-       ceiveShadow = true;
-        scene.add(pointCloud scene.add(pointCloud);
-
-       );
-
-        function create function createCircleTextureCircleTexture()() {
-            const {
-            const canvas = document.createElement canvas = document.createElement('canvas('canvas');
-           ');
-            canvas.width canvas.width =  = 6464;
-            canvas;
-            canvas.height =.height = 64 64;
-           ;
-            const ctx const ctx = canvas = canvas.getContext.getContext('2('2dd');
-            const');
-            const gradient = gradient = ctx.create ctx.createRadialRadialGradientGradient(32(32, 32, 0, , 32, 0, 32,32, 32, 32 32, 32);
-            gradient);
-            gradient.addColorStop(0, 'rg.addColorStop(0, 'rgba(ba(255,255,255,255,255,255,1)1)');
-           ');
-            gradient.add gradient.addColorStopColorStop(0(0.12.12, ', 'rgbargba(255(255,255,255,255,255,0.92,0.92))');
-            gradient');
-            gradient.addColor.addColorStop(Stop(0.35,0.35, 'rg 'rgba(ba(255,255,255,255,255,0.255,0.55)55)');
-           ');
-            gradient.add gradient.addColorStopColorStop(0(0.65, '.65, 'rgrgbaba(255(255,255,255,255,255,0,0.1.1)');
-            gradient)');
-            gradient.addColor.addColorStop(Stop(1,1, 'rg 'rgba(ba(255255,,255,255,255,0255,0)');
-           )');
-            ctx.fill ctx.fillStyle = gradientStyle = gradient;
-            ctx;
-            ctx.fillRect(0, 0, 64, 64.fillRect(0, 0, 64, 64);
-            const texture = new THREE);
-            const texture = new THREE.Can.CanvasTexturevasTexture(can(canvasvas);
-            texture);
-            texture.needs.needsUpdate =Update = true true;
-            return;
-            return texture texture;
-       ;
-        }
-
-        // }
-
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        //  //  ★  ★ 密度 →密度 → 色 色: : 低低密度密度==緑(緑(120°)120°) →  → 高密度高密度=赤=赤(0(0°°)
-        //)
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        function density function densityToColorToColor(density(density)) {
-            const {
-            const t = t = Math.max Math.max(0(0, Math, Math.min(.min(1,1, (d (density - DENSensity - DENSITYITY_MIN_MIN) / (D) / (DENSITY_MAX - DENSITY_MINENSITY_MAX - DENSITY_MIN)));
-           )));
-            //  // 色相色相: : 120°120°((緑)緑) →  → 0°0°(赤(赤)
-           )
-            const hue = ( const hue = (1 -1 - t) t) *  * 120 /120 / 360 360;
-           ;
-            const saturation const saturation =  = 0.0.7 +7 + t * t * 0 0.3.3;
-           ;
-            const lightness const lightness = 0.32 + = 0.32 + t * t * 0 0.48;
-            const color = new THREE.Color();
-           .48;
-            const color = new THREE.Color color.setHSL(h();
-            color.setHSL(hue, saturation, lightnessue, saturation, lightness);
-            return);
-            return color color;
-       ;
-        }
-
-        // 密度 }
-
-        // 密度 →  → 高さ高さ
-        function density
-        function densityToHeightToHeight(density(density)) {
-            const {
-            const t = t = Math.max Math.max(0(0, Math, Math.min(1, (d.min(1, (density -ensity - DENS DENSITY_MINITY_MIN) / (D) / (DENSENSITYITY_MAX -_MAX - DENS DENSITY_MINITY_MIN)));
-           )));
-            const minH = 6 const minH = 6;
-           ;
-            const max const maxH = 360;
-           H = 360 return min;
-           H + return minH + Math.pow Math.pow(t, 1(t, 1.7.7) *) * (max (maxH -H - minH minH);
-        }
-
-        //);
-        }
-
-        // ───────────────── ──────────────────────────────────────────────────────────
-        //─
-        //  点群更新
-         点群更新
-        // // ───────────────── ──────────────────────────────────────
-        function─────────────────────
-        function update updatePointPointCloud(cCloud(cells)ells) {
-            const positions {
-            const positions = point = pointGeometry.Geometry.attributes.positionattributes.position.array;
-            const.array;
-            const colors = pointGeometry.attributes colors = pointGeometry.attributes.color.array.color.array;
-            let total;
-            let totalDensityDensity =  = 0;
-
-            for0;
-
-            for (let (let i = i = 0 0; i < cells; i < cells.length;.length; i++) i++) {
-                {
-                const cell = cells const cell = cells[i[i];
-                const density =];
-                const density = cell.density;
-                const cell.density;
-                const height = height = densityToHeight(d densityToHeight(density);
-                constensity);
-                const color = color = densityTo densityToColor(dColor(density);
-
-                positionsensity);
-
-                positions[i * 3[i * 3] =] = cell.relX;
-                positions cell.relX;
-                positions[i *[i * 3 + 1] = height 3 + 1] = height /  / 22;
-                positions;
-                positions[i *[i * 3 +  32] + 2] = = cell.relZ;
-
-                colors cell.relZ;
-
-                colors[i *[i * 3 3] = color.r;
-               ] = color.r;
-                colors[i colors[i *  * 3 + 13 + 1] =] = color.g;
-                color.g;
-                colors[i *  colors[i * 3 +3 + 2 2] =] = color.b;
-
-                color.b;
-
-                totalD totalDensity += density;
-           ensity += density;
+        function updatePointsFromSim(cells) {
+            const count = Math.min(cells.length, MAX_POINTS);
+            for(let i=0;i<count;i++){
+                const c = cells[i], h = densityToHeight(c.density), col = densityToColor(c.density);
+                posArr[i*3]=c.relX; posArr[i*3+1]=h/2; posArr[i*3+2]=c.relZ;
+                colArr[i*3]=col.r; colArr[i*3+1]=col.g; colArr[i*3+2]=col.b;
             }
-
-            point }
-
-            pointGeometry.Geometry.attributes.positionattributes.position.needsUpdate = true.needsUpdate = true;
-            point;
-            pointGeometry.Geometry.attributes.colorattributes.color.needs.needsUpdate = trueUpdate = true;
-            pointGeometry.computeBoundingSphere();
-
-            const avgDensity = totalDensity;
-            pointGeometry.computeBoundingSphere();
-
-            const avgDensity = totalDensity / cells / cells.length.length;
-            const;
-            const areaKm areaKm2 =2 = Math.P Math.PI *I * (SC (SCAN_RAN_RADIUSADIUS_M /_M / 100 1000)0) **  ** 22;
-            const;
-            const estimated estimatedPopulationPopulation = Math = Math.round(.round(avgDavgDensity *ensity * areaKm areaKm22);
-
-            return);
-
-            return {
-                avg {
-                avgDensityDensity: Math: Math.round(.round(avgDavgDensityensity),
-                estimated),
-                estimatedPopulationPopulation,
-                total,
-                totalCells:Cells: cells.length cells.length
-           
-            };
+            for(let i=count;i<MAX_POINTS;i++) posArr[i*3+1] = -999;
+            pointGeo.attributes.position.needsUpdate = true;
+            pointGeo.attributes.color.needsUpdate = true;
+            pointGeo.setDrawRange(0, count);
+            pointGeo.computeBoundingSphere();
+            return count;
         }
 
-        // ───────────────── };
+        // メイン更新処理
+        let countdownSeconds = UPDATE_INTERVAL / 1000; // 1728
+        function formatCountdown(sec) {
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return `${m}:${String(s).padStart(2,'0')}`;
         }
 
-        // ───────────────────────────────────────────────────────────
-        //
-        //  UI  UI更新更新
-        //
-        // ─ ──────────────────────────────────────
-        function updateUI(l─────────────────────────────────────
-        function updateUI(lat, lon,at, lon, stats) {
-            elLatLon stats) {
-            elLatLon.textContent = `${lat.toFixed(5)}, ${lon.textContent = `${lat.toFixed(5)}, ${lon.toFixed.toFixed(5(5)})}`;
-            el`;
-            elDensityDensityVal.textVal.textContent =Content = `${stats `${stats.avgDensity.avgDensity.toLocaleString()} 人/km².toLocaleString()} 人/km²`;
-            elD`;
-            elDensityVal.className = 'ensityVal.className = 'stat-valuestat-value ' + ' + (stats.avg (stats.avgDensityDensity >  > 50005000 ? 'high' ? 'high' : ' : 'lowlow');
-            el');
-            elPopEstPopEstimate.textContent =imate.textContent = `${stats `${stats.estimatedPopulation.toLocaleString.estimatedPopulation.toLocaleString()} ()} 人人`;
-
-            const barPercent`;
-
-            const barPercent = Math = Math.min(.min(100,100, Math.max Math.max(0(0,
-               ,
-                ((stats ((stats.avg.avgDensity - DENSITY_MIN) / (DENSDensity - DENSITY_MIN) / (DENSITY_MAX - DITY_MAX - DENSITYENSITY_MIN))_MIN)) *  * 100100
-            )
-            ));
-           );
-            elD elDensityBarensityBar.style.width = barPercent +.style.width = barPercent + '% '%';
-            //';
-            // バ バーー色も色も緑緑→赤→赤
-           
-            const bar const barHueHue = ( = (1 -1 - barPercent barPercent / 100) *  / 100) * 120;
-            elDensityBar.style120;
-            elDensityBar.style.background.background =
-                ` =
-                `linear-gradientlinear-gradient(90(90deg,deg, hsl($ hsl(${bar{barHueHue},70},70%,40%), hsl%,40%), hsl(${(${Math.maxMath.max(0(0,barHue,barHue-100-100)},80)},80%,48%,48%))%))`;
-       `;
-        }
-
-        }
-
-        function update function updateStatusBadStatusBadge(ok,ge(ok, countdown countdownSec)Sec) {
-            {
-            if ( if (ok)ok) {
-                {
-                elStatusIndicator.class elStatusIndicator.className =Name = 'ind 'indicatoricator';
-                el';
-                elCountdownCountdown.textContent.textContent = count = countdownSecdownSec;
-           ;
-            } else } else {
-                elStatusIndicator.className = 'indicator warning';
-                elCount {
-                elStatusIndicator.className = 'indicator warning';
-                elCountdown.textdown.textContent =Content = '-- '--';
-           ';
-            }
-        }
-        }
-
-        }
-
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        //
-        //  メ  メイン更新イン更新
-        //
-        // ───────────────────────────────────── ───────────────────────────────────────
-        let
-        let currentLat currentLat = null = null;
-       ;
-        let current let currentLonLon = null = null;
-       ;
-        let countdownValue let countdownValue = UPDATE_INTER = UPDATE_INTERVAL_MS / 100VAL_MS / 10000;
-        let;
-        let updateTimer updateTimer = null = null;
-       ;
-        let count let countdownIntervaldownInterval = null = null;
-
-       ;
-
-        async function async function performUpdate performUpdate()() {
-            update {
-            updateStatusBadStatusBadge(falsege(false, countdownValue, countdownValue);
-            let lat);
-            let lat, lon, lon;
-           ;
+        async function refreshData() {
             try {
-                try {
-                const const position = position = await get await getCurrentPositionCurrentPosition();
-               ();
-                lat = lat = position.co position.coords.lords.latitudeatitude;
-               ;
-                lon lon = position = position.coords.coords.long.longitudeitude;
-                current;
-                currentLat = lat;
-                currentLat = lat;
-                currentLonLon = lon = lon;
-           ;
-            } catch } catch (err (err)) {
-                console {
-                console.warn.warn('位置('位置情報エ情報エラー:',ラー:', err.message err.message);
-               );
-                if ( if (currentLatcurrentLat === null === null)) {
-                    lat {
-                    lat =  = 35.35.68126812;
-                   ;
-                    lon = lon = 139 139.767.76711;
-                    current;
-                    currentLat =Lat = lat lat;
-                    current;
-                    currentLonLon = lon;
-                    console.warn(' = lon;
-                    console.warn('デフォデフォルト位置ルト位置（（東京駅東京駅））');
-                } else');
-                } else {
-                    lat {
-                    lat = current = currentLatLat;
-                    lon;
-                    lon = current = currentLonLon;
-               ;
-                }
-                }
-                elLat elLatLonLon.textContent = `${.textContent = `${lat.tolat.toFixed(Fixed(5)},5)}, ${lon ${lon.toFixed.toFixed(5(5)} ()} (推定推定))`;
-           `;
+                const pos = await getPosition();
+                currentLat = pos.coords.latitude;
+                currentLon = pos.coords.longitude;
+            } catch(e) {}
+            elLatLon.textContent = `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`;
+
+            const dayFactor = getDayTimeFactor();
+            const [weatherFactor, trafficRes, eventFactor, newsFactor] = await Promise.all([
+                getWeatherFactor(currentLat, currentLon),
+                getTrafficFactor(currentLat, currentLon),
+                getEventFactor(currentLat, currentLon),
+                getNewsFactor()
+            ]);
+            const trafficFactor = trafficRes.factor;
+            const points = trafficRes.points;
+
+            const score = computeScore(dayFactor, weatherFactor, trafficFactor, eventFactor, newsFactor);
+            elScore.textContent = score.toFixed(2);
+            elDensityBar.style.width = (score*100)+'%';
+
+            if (points.length > 0) {
+                updatePointsFromReal(points);
+            } else {
+                const simCells = generateSimGrid(score);
+                updatePointsFromSim(simCells);
             }
-
-            const cells = }
-
-            const cells = await fetch await fetchPopulationDPopulationDensity(lensity(lat,at, lon lon);
-            const);
-            const stats = stats = updatePoint updatePointCloud(cCloud(cellsells);
-            update);
-            updateUI(lUI(lat,at, lon, lon, stats stats);
-            update);
-            updateStatusBadStatusBadge(truege(true, count, countdownValuedownValue);
-
-            console);
-
-            console.log.log(
-                `(
-                `[更新[更新] ${] ${lat.tolat.toFixed(Fixed(4)},4)}, ${lon ${lon.toFixed.toFixed(4(4)} |)} | ` ` +
-                +
-                `平均密度: ${stats `平均密度: ${stats.avg.avgDensityDensity} } 人/km人/km² |² | ` ` +
-                ` +
-                `推計推計人口:人口: ${stats ${stats.estimated.estimatedPopulation}Population} 人 人 | ` | ` +
-                +
-                `点 `点群数群数: ${: ${stats.totalstats.totalCells}Cells}`
-           `
-            );
-        );
+            updateMinimap(currentLat, currentLon, points);
+            console.log(`✅ 更新完了: スコア=${score.toFixed(2)}`);
         }
 
-        }
-
-        function getCurrentPosition function getCurrentPosition()() {
-            return {
-            return new Promise new Promise((resolve((resolve, reject, reject) => {
-               ) => {
-                if (!navig if (!navigator.geolocationator.geolocation)) {
-                    reject {
-                    reject(new Error(new Error('Ge('Geolocation API非対応olocation API非'));
-                    return対応'));
-                    return;
-               ;
-                }
-                }
-                navigator.geol navigator.geolocation.getocation.getCurrentPositionCurrentPosition(resolve(resolve, reject, reject,, {
-                    enable {
-                    enableHighAccuracyHighAccuracy: true: true,
-                   ,
-                    timeout: timeout: 100 1000000,
-                    maximum,
-                    maximumAge:Age: 300 3000000,
-               ,
-                });
+        let updateTimer, countdownInterval;
+        function startAutoUpdate() {
+            // 初回即実行
+            refreshData().then(() => {
+                countdownSeconds = UPDATE_INTERVAL / 1000;
+                elCountdown.textContent = formatCountdown(countdownSeconds);
+                elStatusIndicator.className = 'indicator';
             });
-            });
-        });
+            // 定期更新
+            updateTimer = setInterval(async () => {
+                elStatusIndicator.className = 'indicator warning';
+                await refreshData();
+                countdownSeconds = UPDATE_INTERVAL / 1000; // リセット
+                elCountdown.textContent = formatCountdown(countdownSeconds);
+                elStatusIndicator.className = 'indicator';
+            }, UPDATE_INTERVAL);
+            // カウントダウン (毎秒)
+            countdownInterval = setInterval(() => {
+                countdownSeconds = Math.max(0, countdownSeconds - 1);
+                elCountdown.textContent = formatCountdown(countdownSeconds);
+            }, 1000);
         }
 
-        function }
-
-        function startCount startCountdown()down() {
-            {
-            countdown countdownValue =Value = UPDATE_IN UPDATE_INTERVALTERVAL__MS / MS / 1000;
-            elCount1000;
-            elCountdown.textdown.textContent =Content = countdown countdownValueValue;
-            update;
-            updateStatusBadStatusBadge(truege(true, count, countdownValuedownValue);
-           );
-            if ( if (countdowncountdownInterval)Interval) clearInterval clearInterval(countdown(countdownInterval);
-            countInterval);
-            countdownIntervaldownInterval = set = setInterval(()Interval(() => => {
-                count {
-                countdownValuedownValue--;
-               --;
-                if ( if (countdowncountdownValue <= 0) countdownValueValue <= 0) countdownValue = UPDATE = UPDATE_INTER_INTERVAL_VAL_MS /MS / 100 10000;
-                elCountdown;
-                el.textContentCountdown.textContent = Math = Math.max(.max(0,0, countdown countdownValueValue);
-                update);
-                updateStatusBadStatusBadge(true, countge(true, countdownValuedownValue);
-           );
-            },  }, 10001000);
-       );
-        }
-
-        }
-
-        function start function startAutoUpdate() {
-            performAutoUpdate() {
-            performUpdate().Update().then(() => startthen(() => startCountdownCountdown()).catch()).catch((err((err) =>) => {
-                {
-                console.error console.error('初('初回更新回更新エラーエラー:', err:', err);
-               );
-                startCount startCountdowndown();
-            });
-            if();
-            });
-            if (update (updateTimer)Timer) clearInterval clearInterval(updateTimer);
-            update(updateTimer);
-            updateTimerTimer = = setInterval setInterval(async ()(async () => => {
-                try {
-                try {
-                    {
-                    await perform await performUpdateUpdate();
-                    count();
-                    countdownValuedownValue = UPDATE = UPDATE_INTER_INTERVAL_VAL_MS /MS / 100 10000;
-                    el;
-                    elCountdownCountdown.textContent.textContent = countdownValue = countdownValue;
-               ;
-                } catch } catch (err (err)) {
-                    console {
-                    console.error('.error('定期更新定期更新エラーエラー:', err:', err);
-                   );
-                    updateStatus updateStatusBadge(false,Badge(false, countdown countdownValueValue);
-               );
-                }
-            }, }
-            }, UPDATE_IN UPDATE_INTERVALTERVAL_MS_MS);
-       );
-        }
-
-        }
-
-        // // ───────────────────────────────────── ───────────────────────────────────────
-        //  ア
-        //  アニメニメーションーション
-        //
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        const clock const clock = new = new THREE. THREE.ClockClock();
-        function animate(t();
-        function animate(timestamp)imestamp) {
-            {
-            requestAnimation requestAnimationFrame(Frame(animateanimate);
-            const);
-            const dt = dt = Math.min Math.min(clock(clock.getDelta.getDelta(), 0.(), 0.11);
-            controls.update);
+        // アニメーション
+        function animate(ts){
+            requestAnimationFrame(animate);
             controls.update();
-
-();
-
-            const            const pulseRing pulseRingObj =Obj = markerGroup markerGroup.getObject.getObjectByName('ByName('pulsepulseRingRing');
-            if');
-            if (p (pulseRingulseRingObj)Obj) {
-                {
-                const scale = 1 + Math.sin(timestamp const scale = 1 + Math.sin(timestamp *  * 0.0.003)003) *  * 0.0.45;
-                pulse45;
-                pulseRingObjRingObj.scale.scale.setScal.setScalar(ar(scalescale);
-                pulseRingObj);
-                pulseRingObj.material.material.opacity.opacity =  = 0.35 +0.35 + Math.sin Math.sin(timestamp * (timestamp * 0.003)0.003) *  * 0.0.3535;
-           ;
-            }
-            marker }
-            markerGroup.positionGroup.position.y = Math.sin.y = Math.sin(timestamp(timestamp * 0.002) * 0.002) *  * 66;
-
-            render;
-
+            const p = markerGroup.getObjectByName('pulseRing');
+            if(p){ const s=1+Math.sin(ts*0.003)*0.4; p.scale.setScalar(s); p.material.opacity=0.3+Math.sin(ts*0.003)*0.3; }
+            markerGroup.position.y = Math.sin(ts*0.002)*6;
             renderer.render(scene, camera);
-       er.render(scene, camera);
         }
 
-        }
-
-        // ───────────────── // ───────────────────────────────────────────────────────────
-        //
-        //  リ  リサイズサイズ（スマ（スマホ回ホ回転対応）
-        //転対応）
-        // ───────────────────────────────────── ───────────────────────────────────────
-        window.addEventListener('resize
-        window.addEventListener('resize', ()', () => => {
-            camera {
-            camera.aspect.aspect = container = container.clientWidth.clientWidth / container / container.clientHeight.clientHeight;
-           ;
-            camera.updateProjection camera.updateProjectionMatrixMatrix();
-            render();
-            renderer.seter.setSize(Size(container.clientcontainer.clientWidth, container.clientWidth, container.clientHeightHeight);
-            //);
-            // ポイント ポイントサイズサイズを画面を画面幅に幅に応じて動的応じて動的調整調整
-            const
-            const newSize newSize = container = container.clientWidth.clientWidth <  < 400400 ? 18 ? 18 :
-                container :
-                container.clientWidth.clientWidth <  < 600 ?600 ? 22 22 : 30 : 30;
-            point;
-            pointMaterial.sizeMaterial.size = new = newSizeSize;
-       ;
+        // リサイズ
+        window.addEventListener('resize', ()=>{
+            camera.aspect = container.clientWidth/container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            pointMat.size = container.clientWidth<400?18:container.clientWidth<600?22:30;
         });
 
-        // });
-
-        //  画面の画面の向き向き変更時変更時にもにもリサイリサイズをズをトリガートリガー
-       
-        window.addEventListener window.addEventListener('orientation('orientationchange',change', () => {
-            () => {
-            setTimeout(() setTimeout(() => => {
-                window {
-                window.dispatch.dispatchEvent(newEvent(new Event(' Event('resizeresize'));
-           '));
-            },  }, 200200);
-       );
-        });
-
-        // });
-
-        // ─ ───────────────────────────────────────────────────────────────────────────
-
-        //          //  タッチタッチヒントヒント表示
-        // ──────────────────────────────────────
-       表示
-        // ──────────────────────────────────────
-        if ( if (isMobileisMobile)) {
-            el {
-            elTouchHintTouchHint.classList.add.classList.add('visible('visible');
-           ');
-            setTimeout(() setTimeout(() => => {
-                el {
-                elTouchHintTouchHint.classList.remove.classList.remove('visible('visible');
-');
-                       },  }, 60006000);
-           );
-            //  // タッチタッチ操作時に操作時に再再表示表示
-            container
-            container.addEventListener('.addEventListener('touchstarttouchstart', ()', () => => {
-                elTouchHint {
-                elTouchHint.classList.add.classList.add('visible('visible');
-               ');
-                clearTimeout clearTimeout(elTouch(elTouchHint._Hint._timeouttimeout);
-               );
-                elTouchHint._ elTouchHint._timeouttimeout = setTimeout = setTimeout(() =>(() => {
-                    {
-                    elTouch elTouchHint.classListHint.classList.remove('.remove('visiblevisible');
-                },');
-                }, 300 30000);
-            },);
-            }, { once { once: false: false });
-        });
-        }
-
-        }
-
-        // // ───────────────── ───────────────────────────────────────────────────────────
-        //
-        //  キ  キーボーボード操作ード操作（PC（PC向向けけ）
-        //）
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        window.addEventListener('key window.addEventListener('keydown', (edown', (e) =>) => {
-            {
-            switch ( switch (e.keye.key.toLowerCase()).toLowerCase()) {
-                {
-                case ' case 'rr':
-                    camera':
-                    camera.position.set.position.set(110(1100,0, 850 850, , 13001300);
-                   );
-                    controls.target controls.target.set(.set(0,0, 80 80,, 0);
-                    controls 0);
-                    controls.update.update();
-                    break;
-               ();
-                    break;
-                case ' case 'tt':
-                    camera':
-                    camera.position.set(0.position.set(0, , 1700, 1700, 1515);
-                    controls);
-                    controls.target.set.target.set(0(0, , 0,0, 0 0);
-                   );
-                    controls.update controls.update();
-                   ();
-                    break break;
-                case;
-                case 'f 'f':
-                   ':
-                    performUpdate performUpdate().then().then(() =>(() => {
-                        {
-                        countdown countdownValue =Value = UPDATE_IN UPDATE_INTERVALTERVAL_MS_MS /  / 10001000;
-                       ;
-                        elCount elCountdown.textdown.textContent =Content = countdown countdownValueValue;
-                    }).;
-                    }).catch(errcatch(err => console => console.error('.error('強制強制更新エ更新エラー:',ラー:', err err));
-                    break));
-                    break;
-               ;
-                case ' case 'gg':
-                    camera':
-                    camera.position.set.position.set(500(500, , 180,180, 700 700);
-                   );
-                    controls.target controls.target.set(.set(0,0, 120 120, , 00);
-                    controls.update);
-                    controls.update();
-                    break;
-            }
-       ();
-                    break;
+        // Geoapify APIキー設定
+        apiKeyApply.addEventListener('click', ()=>{
+            geoapifyKey = apiKeyInput.value.trim();
+            if (geoapifyKey) {
+                elEvent.textContent = 'キー有効 (次回更新時に反映)';
             }
         });
 
+        // キー操作
+        window.addEventListener('keydown', e=>{
+            if(e.key==='r'){ camera.position.set(1100,850,1300); controls.target.set(0,80,0); controls.update(); }
+            else if(e.key==='t'){ camera.position.set(0,1700,15); controls.target.set(0,0,0); controls.update(); }
+            else if(e.key==='f'){ refreshData(); countdownSeconds=UPDATE_INTERVAL/1000; elCountdown.textContent=formatCountdown(countdownSeconds); }
         });
 
-        // ───────────────────────────────────── // ───────────────────────────────────────
-        //
-        //  起  起動
-        //動
-        // ─ ───────────────────────────────────────────────────────────────────────────
-       
-        console.log console.log('('🚀 🚀 人口密度人口密度3D3Dスキャナー vスキャ2 |ナー v2 |  点点群密度群密度: ' + GR: ' + GRID_RESID_RESOLUTIONOLUTION + ' + '×'×' + GR + GRID_RESID_RESOLUTIONOLUTION +
-            +
-            ' (' + totalPoints + '点 ' (' + totalPoints + '点) |) | 色 色: : 緑緑→赤→赤 | | モ モバイルバイル: ': ' + ( + (isMobileisMobile ? ' ? '最最適化適化済済' :' : 'PC 'PCモモード'));
-       ード console'));
-        console.log('.log('  操作  操作: : スワスワイプイプ/ド/ドラッラッグ=グ=回転回転, , ピンチピンチ/スク/スクロールロール=ズ=ズーム,ーム, 二 二本指本指ドラドラッグッグ=パ=パンン');
-        console');
-        console.log('.log('    キーキー: R: R=リ=リセット視セット視点,点, T= T=トップトップビュービュー, F, F=強=強制更新制更新, G, G==地上地上視点視点');
-
-       ');
-
-        startAuto startAutoUpdateUpdate();
-        request();
-        requestAnimationFrameAnimationFrame(animate(animate);
-   );
-    </script </script>
-</>
-</bodybody>
+        // 起動
+        console.log('🚀 統合人流予測 28.8分更新 | Geoapifyイベント機能');
+        startAutoUpdate();
+        requestAnimationFrame(animate);
+    </script>
+</body>
 </html>
-</html>
->
