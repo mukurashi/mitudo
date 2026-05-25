@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>統合人流予測 3D + 地図 (Geoapify)</title>
+    <title>統合リアルタイム人流予測 3Dマップ (10秒更新)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
@@ -15,7 +15,8 @@
         body{
             background:var(--bg); overflow:hidden;
             font-family:'Segoe UI','Inter',sans-serif;
-            height:100vh;width:100vw;position:fixed;top:0;left:0;
+            height:100vh;width:100vw;
+            position:fixed;top:0;left:0;
             user-select:none;-webkit-user-select:none;
             -webkit-tap-highlight-color:transparent;
             touch-action:pan-x pan-y pinch-zoom;
@@ -26,7 +27,7 @@
             background:var(--panel-bg);backdrop-filter:blur(16px);
             border:1px solid rgba(255,255,255,0.15);border-radius:14px;
             padding:12px 14px;color:var(--text);font-size:0.8rem;
-            min-width:240px;max-width:calc(100vw - 20px);
+            min-width:280px;max-width:calc(100vw - 20px);
             box-shadow:0 8px 32px rgba(0,0,0,0.5);
         }
         #info-panel h2{font-size:0.95rem;margin-bottom:6px;color:#fff;}
@@ -58,64 +59,74 @@
         @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(85,204,136,0.7)}50%{box-shadow:0 0 0 10px rgba(85,204,136,0)}}
         @keyframes pulse-warn{0%,100%{box-shadow:0 0 0 0 rgba(255,170,51,0.7)}50%{box-shadow:0 0 0 10px rgba(255,170,51,0)}}
 
+        /* 拡大ミニマップ (デフォルトで大きめ、フルスクリーン用も用意) */
         #minimap-container{
             position:fixed;bottom:20px;right:10px;z-index:10;
-            width:180px;height:180px;border-radius:12px;overflow:hidden;
+            width:280px;height:280px;border-radius:12px;overflow:hidden;
             border:2px solid rgba(255,255,255,0.3);
             box-shadow:0 8px 32px rgba(0,0,0,0.6);
         }
         #minimap{width:100%;height:100%;}
+
+        /* フルスクリーンマップ */
+        #fullmap-container{
+            position:fixed;top:0;left:0;width:100%;height:100%;z-index:20;
+            display:none;
+        }
+        #fullmap{width:100%;height:100%;}
+        #close-map-btn{
+            position:absolute;top:20px;right:20px;z-index:30;
+            background:var(--panel-bg);color:white;border:none;border-radius:50%;
+            width:40px;height:40px;font-size:1.5rem;cursor:pointer;
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 4px 16px rgba(0,0,0,0.5);
+        }
+
         @media (max-width:600px){
-            #info-panel{font-size:0.7rem;padding:8px 10px;min-width:180px;}
+            #info-panel{font-size:0.7rem;padding:8px 10px;min-width:200px;}
             #legend{bottom:10px;padding:5px 10px;}
-            #minimap-container{width:120px;height:120px;bottom:10px;}
+            #minimap-container{width:200px;height:200px;bottom:10px;}
         }
-        #api-key-panel{
-            position:fixed;bottom:20px;left:200px;z-index:20;
-            background:var(--panel-bg);padding:8px;border-radius:8px;
-            color:white;font-size:0.6rem;display:flex;gap:5px;align-items:center;
-        }
-        #api-key-input{width:160px;padding:2px;border-radius:4px;border:1px solid #555;background:#222;color:white;}
-        button{padding:2px 6px;border-radius:4px;background:#44a;color:white;border:none;cursor:pointer;}
     </style>
 </head>
 <body>
     <div id="canvas-container"></div>
-
     <div id="info-panel">
-        <h2>📊 統合人流予測 (Geoapify)</h2>
+        <h2>📊 統合リアルタイム人流予測 (10秒)</h2>
         <div class="stat-row"><span class="stat-label">📍 位置</span><span class="stat-value" id="latlon">取得中</span></div>
         <div class="stat-row"><span class="stat-label">🕒 曜日/時間</span><span class="stat-value" id="daytime">--</span></div>
         <div class="stat-row"><span class="stat-label">🌤 天気</span><span class="stat-value" id="weather">--</span></div>
-        <div class="stat-row"><span class="stat-label">🚦 交通量(観測点)</span><span class="stat-value" id="traffic">--</span></div>
+        <div class="stat-row"><span class="stat-label">🌫️ 大気質 (PM2.5)</span><span class="stat-value" id="airquality">--</span></div>
+        <div class="stat-row"><span class="stat-label">🚆 鉄道遅延</span><span class="stat-value" id="transport">--</span></div>
+        <div class="stat-row"><span class="stat-label">🚦 交通量</span><span class="stat-value" id="traffic">--</span></div>
         <div class="stat-row"><span class="stat-label">🎉 イベント施設</span><span class="stat-value" id="event">--</span></div>
+        <div class="stat-row"><span class="stat-label">🏢 周辺施設数</span><span class="stat-value" id="poi">--</span></div>
         <div class="stat-row"><span class="stat-label">📰 ニュース</span><span class="stat-value" id="news">--</span></div>
+        <div class="stat-row"><span class="stat-label">🎌 祝日</span><span class="stat-value" id="holiday">--</span></div>
         <div class="stat-row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.2);padding-top:4px;">
-            <span class="stat-label">📈 統合スコア</span>
-            <span class="stat-value" id="score-val">--</span>
+            <span class="stat-label">📈 統合スコア</span><span class="stat-value" id="score-val">--</span>
         </div>
         <div class="bar-container"><div class="bar-fill" id="density-bar" style="width:0%;"></div></div>
     </div>
-
     <div id="legend">
         <span style="font-weight:600;">混雑度 (統合スコア)</span>
         <div class="gradient-bar"></div>
         <div class="legend-labels"><span>低</span><span>中</span><span>高</span></div>
     </div>
-
     <div id="status-badge">
         <span class="indicator" id="status-indicator"></span>
-        <span>次回更新 <span id="countdown">28:48</span></span>
+        <span>次回更新 <span id="countdown">10</span>s</span>
     </div>
 
+    <!-- 拡大ミニマップ -->
     <div id="minimap-container">
         <div id="minimap"></div>
     </div>
 
-    <div id="api-key-panel">
-        <span>🔑 Geoapify APIキー</span>
-        <input type="text" id="api-key-input" placeholder="キーを入力して有効化">
-        <button id="api-key-apply">適用</button>
+    <!-- フルスクリーンマップ -->
+    <div id="fullmap-container">
+        <div id="fullmap"></div>
+        <button id="close-map-btn">✕</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -126,31 +137,64 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // 設定
-        const UPDATE_INTERVAL = 28.8 * 60 * 1000; // 28.8分 (1728000ミリ秒)
+        // ─── 設定 ─────────────────────────────
+        const MAIN_UPDATE_INTERVAL = 10000; // 10秒 (メインループ)
         const RADIUS_M = 1000;
         const DENSITY_MAX = 100;
-        const FALLBACK_GRID_RES = 30;
-        const MAX_POINTS = 300;
+        const FALLBACK_GRID_RES = 50;
+        const MAX_POINTS = 3000;
         const isMobile = window.innerWidth < 768;
+
+        // APIキー
+        const GEOAPIFY_KEY = 'e1cb67146472422c8fd045c6af4ab16e';
+        const ODPT_API_KEY = 'YOUR_ODPT_API_KEY';
+
+        // ─── 各因子の更新間隔 (ミリ秒) ────
+        const INTERVALS = {
+            dayTime: 60000,           // 毎分計算し直し (実際には毎回Dateで取得)
+            weather: 10 * 60 * 1000,  // 10分
+            airQuality: 30 * 60 * 1000, // 30分
+            transport: 60 * 1000,     // 1分
+            traffic: 5 * 60 * 1000,   // 5分 (xROADの5分間隔に合わせる)
+            event: 30 * 60 * 1000,    // 30分
+            poi: 30 * 60 * 1000,      // 30分
+            news: 60 * 60 * 1000,     // 60分
+            holiday: 12 * 60 * 60 * 1000 // 12時間
+        };
+
+        // キャッシュ格納
+        const cache = {
+            factors: {
+                day: 0.5, weather: 0.5, airQuality: 0.5, transport: 0.1, traffic: 0.5,
+                event: 0.3, poi: 0.5, news: 0.4, holiday: 0.3
+            },
+            points: [],
+            lastFetch: {
+                weather: 0, airQuality: 0, transport: 0, traffic: 0, event: 0, poi: 0, news: 0, holiday: 0
+            },
+            displayStrings: {
+                weather: '--', airQuality: '--', transport: '--', traffic: '--', event: '--', poi: '--', news: '--', holiday: '--'
+            }
+        };
 
         // DOM
         const container = document.getElementById('canvas-container');
         const elLatLon = document.getElementById('latlon');
         const elDaytime = document.getElementById('daytime');
         const elWeather = document.getElementById('weather');
+        const elAirQuality = document.getElementById('airquality');
+        const elTransport = document.getElementById('transport');
         const elTraffic = document.getElementById('traffic');
         const elEvent = document.getElementById('event');
+        const elPoi = document.getElementById('poi');
         const elNews = document.getElementById('news');
+        const elHoliday = document.getElementById('holiday');
         const elScore = document.getElementById('score-val');
         const elDensityBar = document.getElementById('density-bar');
         const elCountdown = document.getElementById('countdown');
         const elStatusIndicator = document.getElementById('status-indicator');
-        const apiKeyInput = document.getElementById('api-key-input');
-        const apiKeyApply = document.getElementById('api-key-apply');
 
         let currentLat = 35.6812, currentLon = 139.7671;
-        let geoapifyKey = ''; // Geoapify APIキー
 
         // 位置情報
         function getPosition() {
@@ -162,7 +206,7 @@
             });
         }
 
-        // 因子1: 曜日・時間帯
+        // ─── 因子計算 (キャッシュ対応) ────
         function getDayTimeFactor() {
             const now = new Date();
             const day = now.getDay();
@@ -184,16 +228,14 @@
             return factor;
         }
 
-        // 因子2: 天気 (Open-Meteo)
-        async function getWeatherFactor(lat, lon) {
+        async function fetchWeather(lat, lon) {
             try {
                 const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
                 const res = await fetch(url);
                 const data = await res.json();
                 const code = data.current_weather.weathercode;
                 const temp = data.current_weather.temperature;
-                let factor = 0.8;
-                let desc = '';
+                let factor = 0.8, desc = '';
                 if (code === 0) { factor = 1.0; desc = '快晴'; }
                 else if (code <= 3) { factor = 0.9; desc = '曇り'; }
                 else if (code <= 48) { factor = 0.7; desc = '霧'; }
@@ -202,16 +244,54 @@
                 else { factor = 0.6; desc = '他'; }
                 if (temp < 5) factor *= 0.7;
                 else if (temp > 35) factor *= 0.8;
-                elWeather.textContent = `${desc} ${temp}℃ (${factor.toFixed(2)})`;
-                return factor;
+                return { factor, text: `${desc} ${temp}℃ (${factor.toFixed(2)})` };
             } catch (e) {
-                elWeather.textContent = '取得失敗';
-                return 0.5;
+                return { factor: cache.factors.weather, text: '取得失敗' };
             }
         }
 
-        // 因子3: 交通量 (xROAD)
-        async function fetchTrafficPoints(lat, lng) {
+        async function fetchAirQuality(lat, lon) {
+            try {
+                const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=pm2_5`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const pm25 = data.current?.pm2_5 || 10;
+                const factor = Math.max(0, 1 - pm25 / 100);
+                return { factor, text: `PM2.5 ${pm25}µg/m³ (${factor.toFixed(2)})` };
+            } catch (e) {
+                return { factor: cache.factors.airQuality, text: '取得失敗' };
+            }
+        }
+
+        async function fetchTransport(lat, lon) {
+            if (ODPT_API_KEY === 'YOUR_ODPT_API_KEY') {
+                // シミュレーション
+                const now = new Date();
+                const hour = now.getHours();
+                const day = now.getDay();
+                let factor = 0.1;
+                if (day >= 1 && day <= 5) {
+                    if (hour >= 7 && hour <= 9) factor = 0.6;
+                    else if (hour >= 17 && hour <= 19) factor = 0.5;
+                    else if (hour >= 10 && hour <= 16) factor = 0.3;
+                } else {
+                    if (hour >= 10 && hour <= 18) factor = 0.25;
+                }
+                return { factor, text: `遅延確率 ${(factor*100).toFixed(0)}% (${factor.toFixed(2)})` };
+            }
+            try {
+                const url = `https://api.odpt.org/api/v1/railway/delays?odpt:operator=odpt.Operator:JR-East&acl:consumerKey=${ODPT_API_KEY}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const delayCount = Array.isArray(data) ? data.length : 0;
+                const factor = Math.min(1, delayCount * 0.1 + 0.1);
+                return { factor, text: `${delayCount}路線遅延 (${factor.toFixed(2)})` };
+            } catch (e) {
+                return { factor: cache.factors.transport, text: '取得失敗' };
+            }
+        }
+
+        async function fetchTrafficData(lat, lng) {
             const dLat = 1.0 / 111.32;
             const dLon = 1.0 / (111.32 * Math.cos(lat * Math.PI/180));
             const bbox = [lng-dLon, lat-dLat, lng+dLon, lat+dLat].map(v=>v.toFixed(6)).join(',');
@@ -223,7 +303,7 @@
             const timeCodeEnd = `${y}${m}${d}${h}${pad(parseInt(min)+5)}`;
             const url = `https://api.jartic-open-traffic.org/geoserver?service=WFS&version=2.0.0&request=GetFeature&typeNames=t_travospublic_measure_5m&srsName=EPSG:4326&outputFormat=application/json&cql_filter=BBOX(ジオメトリ,${bbox},'EPSG:4326') AND 時間コード>=${timeCode} AND 時間コード<=${timeCodeEnd} AND 道路種別='3'`;
             const res = await fetch(url);
-            if (!res.ok) return [];
+            if (!res.ok) return null;
             const data = await res.json();
             if (!data.features) return [];
             return data.features.map(f=>{
@@ -233,69 +313,122 @@
             });
         }
 
-        async function getTrafficFactor(lat, lon) {
+        async function fetchEvent(lat, lon) {
             try {
-                const points = await fetchTrafficPoints(lat, lon);
-                if (points.length === 0) {
-                    elTraffic.textContent = '観測点なし';
-                    return { factor: 0.5, points: [] };
-                }
-                const avg = points.reduce((s,p)=>s+p.volume,0)/points.length;
-                const factor = Math.min(1, avg / DENSITY_MAX);
-                elTraffic.textContent = `${points.length}地点 平均${Math.round(avg)}台/5分 (${factor.toFixed(2)})`;
-                return { factor, points };
-            } catch (e) {
-                elTraffic.textContent = 'APIエラー';
-                return { factor: 0.5, points: [] };
-            }
-        }
-
-        // 因子4: イベント (Geoapify Places API)
-        async function getEventFactor(lat, lon) {
-            if (!geoapifyKey) {
-                elEvent.textContent = 'キー未設定';
-                return 0.3;
-            }
-            try {
-                // イベント会場とみなせるカテゴリ: コンベンションセンター、スタジアム、劇場
                 const categories = 'building.convention_center,entertainment.stadium,entertainment.theatre';
-                const radius = 1000;
-                const url = `https://api.geoapify.com/v2/places?categories=${encodeURIComponent(categories)}&filter=circle:${lon},${lat},${radius}&limit=50&apiKey=${geoapifyKey}`;
+                const url = `https://api.geoapify.com/v2/places?categories=${encodeURIComponent(categories)}&filter=circle:${lon},${lat},1000&limit=50&apiKey=${GEOAPIFY_KEY}`;
                 const res = await fetch(url);
                 const data = await res.json();
                 const count = data.features ? data.features.length : 0;
                 const factor = Math.min(1, count * 0.25 + 0.3);
-                elEvent.textContent = `${count}施設 (${factor.toFixed(2)})`;
-                return factor;
+                return { factor, text: `${count}施設 (${factor.toFixed(2)})` };
             } catch (e) {
-                elEvent.textContent = 'エラー';
-                return 0.3;
+                return { factor: cache.factors.event, text: 'エラー' };
             }
         }
 
-        // 因子5: ニュース (GDELT)
-        async function getNewsFactor() {
+        async function fetchPoi(lat, lon) {
+            try {
+                const query = `[out:json];(node[amenity](around:1000,${lat},${lon});way[amenity](around:1000,${lat},${lon}););out count;`;
+                const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                const count = data.elements ? data.elements.length : 0;
+                const factor = Math.min(1, count / 100 * 0.5 + 0.3);
+                return { factor, text: `${count}施設 (${factor.toFixed(2)})` };
+            } catch (e) {
+                return { factor: cache.factors.poi, text: '取得失敗' };
+            }
+        }
+
+        async function fetchNews() {
             try {
                 const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=japan&mode=artlist&format=json&timespan=24h&maxrecords=20`;
                 const res = await fetch(url);
                 const data = await res.json();
-                const count = data.articles ? data.articles.length : 0;
-                const factor = Math.min(1, count * 0.1 + 0.2);
-                elNews.textContent = `${count}記事 (${factor.toFixed(2)})`;
-                return factor;
+                const articles = data.articles || [];
+                const count = articles.length;
+                const avgTone = articles.reduce((sum, a) => sum + (a.tone || 0), 0) / (count || 1);
+                const factor = Math.min(1, (count * 0.1 + 0.2) * (avgTone > 0 ? 1 : 0.8));
+                return { factor, text: `${count}記事 トーン${avgTone.toFixed(1)} (${factor.toFixed(2)})` };
             } catch (e) {
-                elNews.textContent = '取得失敗';
-                return 0.4;
+                return { factor: cache.factors.news, text: '取得失敗' };
             }
         }
 
-        // 統合スコア計算
-        function computeScore(day, weather, traffic, event, news) {
-            return day*0.25 + weather*0.2 + traffic*0.35 + event*0.1 + news*0.1;
+        async function fetchHoliday() {
+            try {
+                const today = new Date();
+                const dateStr = today.toISOString().split('T')[0];
+                const url = `https://holidays-jp.github.io/api/v1/${today.getFullYear()}/date.json`;
+                const res = await fetch(url);
+                const holidays = await res.json();
+                const isHoliday = !!holidays[dateStr];
+                const factor = isHoliday ? 0.9 : 0.3;
+                return { factor, text: isHoliday ? '祝日' : '平日' };
+            } catch (e) {
+                return { factor: cache.factors.holiday, text: '取得失敗' };
+            }
         }
 
-        // --- ミニマップ (Leaflet) ---
+        // キャッシュ管理付き因子更新
+        async function updateFactor(key, fetchFn, lat, lon, interval) {
+            const now = Date.now();
+            if (now - cache.lastFetch[key] > interval) {
+                let result;
+                if (key === 'news' || key === 'holiday') {
+                    result = await fetchFn();
+                } else {
+                    result = await fetchFn(lat, lon);
+                }
+                cache.factors[key] = result.factor;
+                cache.displayStrings[key] = result.text;
+                cache.lastFetch[key] = now;
+            }
+            // UI更新
+            const elMap = {
+                weather: elWeather,
+                airQuality: elAirQuality,
+                transport: elTransport,
+                traffic: elTraffic,
+                event: elEvent,
+                poi: elPoi,
+                news: elNews,
+                holiday: elHoliday
+            };
+            if (elMap[key]) elMap[key].textContent = cache.displayStrings[key];
+            return cache.factors[key];
+        }
+
+        // 交通量ポイント取得 (キャッシュ)
+        async function getTrafficPoints(lat, lon) {
+            const now = Date.now();
+            if (now - cache.lastFetch.traffic > INTERVALS.traffic) {
+                const points = await fetchTrafficData(lat, lon);
+                if (points !== null) {
+                    cache.points = points;
+                    cache.lastFetch.traffic = now;
+                }
+            }
+            return cache.points;
+        }
+
+        // 統合スコア計算
+        function computeScore(factors) {
+            const weights = {
+                day: 0.15, weather: 0.15, airQuality: 0.05, transport: 0.2,
+                traffic: 0.2, event: 0.05, poi: 0.05, news: 0.1, holiday: 0.05
+            };
+            let score = 0;
+            for (const key in weights) {
+                score += (factors[key] || 0.5) * weights[key];
+            }
+            return Math.min(1, Math.max(0, score));
+        }
+
+        // ─── Leaflet マップ ─────────────────
         let minimap, userMarker, trafficLayer;
+        let fullmap, fullUserMarker, fullTrafficLayer;
         function initMinimap() {
             minimap = L.map('minimap', { attributionControl:false, zoomControl:false, dragging:false }).setView([currentLat, currentLon], 14);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(minimap);
@@ -311,28 +444,95 @@
                 L.circleMarker([p.lat, p.lon], { radius:4, color:'#3388ff', fillColor:'#3388ff', fillOpacity:0.7 })
                  .bindPopup(`交通量: ${p.volume}台/5分`).addTo(trafficLayer);
             });
+            if (fullmap) {
+                fullmap.setView([lat, lon], 14);
+                fullUserMarker.setLatLng([lat, lon]);
+                fullTrafficLayer.clearLayers();
+                points.forEach(p => {
+                    L.circleMarker([p.lat, p.lon], { radius:4, color:'#3388ff', fillColor:'#3388ff', fillOpacity:0.7 })
+                     .bindPopup(`交通量: ${p.volume}台/5分`).addTo(fullTrafficLayer);
+                });
+            }
         }
 
-        // --- Three.js シーン ---
+        function initFullmap() {
+            if (fullmap) return;
+            fullmap = L.map('fullmap', { attributionControl:false, zoomControl:true }).setView([currentLat, currentLon], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(fullmap);
+            fullUserMarker = L.circleMarker([currentLat, currentLon], { radius:8, color:'red', fillColor:'#f03', fillOpacity:0.9 }).addTo(fullmap);
+            fullTrafficLayer = L.layerGroup().addTo(fullmap);
+        }
+
+        document.getElementById('close-map-btn').addEventListener('click', () => {
+            document.getElementById('fullmap-container').style.display = 'none';
+        });
+        function toggleFullMap() {
+            const fullContainer = document.getElementById('fullmap-container');
+            if (fullContainer.style.display === 'none' || !fullContainer.style.display) {
+                initFullmap();
+                updateMinimap(currentLat, currentLon, cache.points);
+                fullContainer.style.display = 'block';
+                fullmap.invalidateSize();
+            } else {
+                fullContainer.style.display = 'none';
+            }
+        }
+
+        // ─── Three.js シーン (高視認性) ────
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0a0a18);
-        scene.fog = new THREE.Fog(0x0a0a18, 600, 3500);
         const camera = new THREE.PerspectiveCamera(isMobile?55:50, container.clientWidth/container.clientHeight, 10, 6000);
-        camera.position.set(1100,850,1300); camera.lookAt(0,0,0);
+        camera.position.set(1100,850,1300);
         const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
         renderer.setSize(container.clientWidth, container.clientHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        controls.target.set(0,80,0); controls.enableDamping=true; controls.dampingFactor=0.15;
-        controls.minDistance=150; controls.maxDistance=3500; controls.update();
+        controls.target.set(0,0,0);
+        controls.enableDamping=true; controls.dampingFactor=0.15;
+        controls.minDistance=150; controls.maxDistance=3500;
+        controls.update();
 
         scene.add(new THREE.AmbientLight(0x334466, 2.5));
         scene.add(new THREE.HemisphereLight(0x8899cc, 0x223344, 2));
-        const ground = new THREE.Mesh(new THREE.PlaneGeometry(RADIUS_M*2.4,RADIUS_M*2.4),
-            new THREE.MeshStandardMaterial({color:0x1a1a3a, roughness:0.85, metalness:0.1, transparent:true, opacity:0.5}));
-        ground.rotation.x=-Math.PI/2; ground.position.y=-15; scene.add(ground);
+
+        const groundSize = RADIUS_M * 2.4;
+        const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+        const groundMat = new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.9, metalness:0.1, transparent:true, opacity:0.9});
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI/2;
+        ground.position.y = -15;
+        scene.add(ground);
+
+        async function loadGroundTexture(lat, lon) {
+            const zoom = 14;
+            const n = Math.pow(2, zoom);
+            const latRad = lat * Math.PI / 180;
+            const xTile = (lon + 180) / 360 * n;
+            const yTile = (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n;
+            const tileX = Math.floor(xTile);
+            const tileY = Math.floor(yTile);
+            const fracX = xTile - tileX;
+            const fracY = yTile - tileY;
+            const tileUrl = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = tileUrl;
+            await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width; canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const texture = new THREE.CanvasTexture(canvas);
+            const tileSizeMeters = (156543.03392 * Math.cos(latRad)) / Math.pow(2, zoom) * 256;
+            const scale = groundSize / tileSizeMeters;
+            texture.repeat.set(scale, scale);
+            texture.offset.set(0.5 - fracX * scale, 0.5 - fracY * scale);
+            groundMat.map = texture;
+            groundMat.needsUpdate = true;
+        }
+
         const gridHelper = new THREE.PolarGridHelper(RADIUS_M,32,16,64,0x334466,0x223355);
         gridHelper.position.y=-14; scene.add(gridHelper);
         const ring = new THREE.Mesh(new THREE.TorusGeometry(RADIUS_M,6,16,100),
@@ -345,28 +545,51 @@
         const pulse = new THREE.Mesh(new THREE.TorusGeometry(26,4,16,48),
             new THREE.MeshStandardMaterial({color:0xff6677, roughness:0.3, metalness:0.4, emissive:0x330000, transparent:true, opacity:0.7}));
         pulse.rotation.x=-Math.PI/2; pulse.name='pulseRing'; markerGroup.add(pulse);
-        markerGroup.position.y=0; scene.add(markerGroup);
+        markerGroup.position.set(0,0,0); scene.add(markerGroup);
 
-        // 点群バッファ
+        // 点群
         const pointGeo = new THREE.BufferGeometry();
-        const posArr = new Float32Array(MAX_POINTS*3);
-        const colArr = new Float32Array(MAX_POINTS*3);
-        pointGeo.setAttribute('position', new THREE.BufferAttribute(posArr,3));
-        pointGeo.setAttribute('color', new THREE.BufferAttribute(colArr,3));
+        const posArr = new Float32Array(MAX_POINTS * 3);
+        const colArr = new Float32Array(MAX_POINTS * 3);
+        pointGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        pointGeo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
         pointGeo.setDrawRange(0,0);
+
         const spriteTex = (()=>{
             const c=document.createElement('canvas'); c.width=64;c.height=64;
             const ctx=c.getContext('2d'); const g=ctx.createRadialGradient(32,32,0,32,32,32);
-            g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.3,'rgba(255,255,255,0.6)'); g.addColorStop(1,'rgba(255,255,255,0)');
+            g.addColorStop(0,'rgba(255,255,255,1)');
+            g.addColorStop(0.1,'rgba(255,255,255,0.95)');
+            g.addColorStop(0.3,'rgba(255,255,255,0.7)');
+            g.addColorStop(0.6,'rgba(255,255,255,0.25)');
+            g.addColorStop(1,'rgba(255,255,255,0)');
             ctx.fillStyle=g; ctx.fillRect(0,0,64,64);
             return new THREE.CanvasTexture(c);
         })();
-        const pointMat = new THREE.PointsMaterial({size:isMobile?20:28, map:spriteTex, vertexColors:true, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:true, transparent:true, opacity:0.85});
+
+        const basePointSize = isMobile ? 28 : 42;
+        const pointMat = new THREE.PointsMaterial({
+            size: basePointSize,
+            map: spriteTex,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            depthTest: true,
+            transparent: true,
+            opacity: 0.95,
+            sizeAttenuation: true
+        });
         const pointCloud = new THREE.Points(pointGeo, pointMat);
         scene.add(pointCloud);
 
-        function densityToColor(d){ const t=Math.min(1,d/DENSITY_MAX); return new THREE.Color().setHSL((1-t)*0.33,0.8,0.4+t*0.4); }
-        function densityToHeight(d){ const t=Math.min(1,d/DENSITY_MAX); return 8 + Math.pow(t,1.5)*300; }
+        function densityToColor(d) {
+            const t = Math.min(1, d / DENSITY_MAX);
+            return new THREE.Color().setHSL((1-t)*0.33, 0.9 + t*0.1, 0.5 + t*0.15);
+        }
+        function densityToHeight(d) {
+            const t = Math.min(1, d / DENSITY_MAX);
+            return 8 + Math.pow(t, 1.5) * 300;
+        }
 
         function updatePointsFromReal(points) {
             const count = Math.min(points.length, MAX_POINTS);
@@ -384,19 +607,31 @@
             pointGeo.attributes.color.needsUpdate = true;
             pointGeo.setDrawRange(0, count);
             pointGeo.computeBoundingSphere();
-            return count;
         }
 
-        function generateSimGrid(score) {
+        function generateSimGrid(score, transportFactor) {
             const cells = [];
             const half = (FALLBACK_GRID_RES-1)/2;
             const spacing = (RADIUS_M*2)/(FALLBACK_GRID_RES-1);
-            for(let r=0;r<FALLBACK_GRID_RES;r++){
-                for(let c=0;c<FALLBACK_GRID_RES;c++){
+            const hotspots = [];
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.5;
+                const dist = 300 + Math.random() * 600;
+                hotspots.push({ x: Math.cos(angle) * dist, z: Math.sin(angle) * dist, strength: 0.6 + Math.random() * 0.4 });
+            }
+            if (transportFactor > 0.4) {
+                hotspots.push({ x: 0, z: 0, strength: transportFactor * 0.8 });
+            }
+            for(let r=0; r<FALLBACK_GRID_RES; r++){
+                for(let c=0; c<FALLBACK_GRID_RES; c++){
                     const x = (c-half)*spacing, z = (r-half)*spacing;
-                    const dist = Math.sqrt(x*x+z*z)/RADIUS_M;
-                    const density = DENSITY_MAX * (score * Math.exp(-dist*dist*2.5) + 0.1*Math.random());
-                    cells.push({ relX:x, relZ:z, density: Math.min(DENSITY_MAX, density) });
+                    let density = 0.05 + (score * 0.1);
+                    hotspots.forEach(h => {
+                        const d = Math.sqrt((x-h.x)**2 + (z-h.z)**2);
+                        density += h.strength * Math.exp(-d*d/(2*250*250));
+                    });
+                    density = Math.min(DENSITY_MAX, density * DENSITY_MAX);
+                    cells.push({ relX: x, relZ: z, density });
                 }
             }
             return cells;
@@ -414,18 +649,14 @@
             pointGeo.attributes.color.needsUpdate = true;
             pointGeo.setDrawRange(0, count);
             pointGeo.computeBoundingSphere();
-            return count;
         }
 
-        // メイン更新処理
-        let countdownSeconds = UPDATE_INTERVAL / 1000; // 1728
-        function formatCountdown(sec) {
-            const m = Math.floor(sec / 60);
-            const s = Math.floor(sec % 60);
-            return `${m}:${String(s).padStart(2,'0')}`;
-        }
+        // ─── 10秒メインループ ─────────────────
+        let countdown = 10;
+        let mainTimer;
 
-        async function refreshData() {
+        async function mainUpdate() {
+            // 位置情報 (毎回更新可、ただしキャッシュするなら必要に応じて)
             try {
                 const pos = await getPosition();
                 currentLat = pos.coords.latitude;
@@ -433,54 +664,69 @@
             } catch(e) {}
             elLatLon.textContent = `${currentLat.toFixed(5)}, ${currentLon.toFixed(5)}`;
 
-            const dayFactor = getDayTimeFactor();
-            const [weatherFactor, trafficRes, eventFactor, newsFactor] = await Promise.all([
-                getWeatherFactor(currentLat, currentLon),
-                getTrafficFactor(currentLat, currentLon),
-                getEventFactor(currentLat, currentLon),
-                getNewsFactor()
-            ]);
-            const trafficFactor = trafficRes.factor;
-            const points = trafficRes.points;
+            // 地図テクスチャ更新 (位置が変わった時のみ？毎回でもOK)
+            loadGroundTexture(currentLat, currentLon);
 
-            const score = computeScore(dayFactor, weatherFactor, trafficFactor, eventFactor, newsFactor);
+            // 各因子をキャッシュ間隔に従って更新
+            const dayFactor = getDayTimeFactor();
+            const [weatherFactor, airFactor, transportFactor, eventFactor, poiFactor, newsFactor, holidayFactor] = await Promise.all([
+                updateFactor('weather', fetchWeather, currentLat, currentLon, INTERVALS.weather),
+                updateFactor('airQuality', fetchAirQuality, currentLat, currentLon, INTERVALS.airQuality),
+                updateFactor('transport', fetchTransport, currentLat, currentLon, INTERVALS.transport),
+                updateFactor('event', fetchEvent, currentLat, currentLon, INTERVALS.event),
+                updateFactor('poi', fetchPoi, currentLat, currentLon, INTERVALS.poi),
+                updateFactor('news', fetchNews, null, null, INTERVALS.news),
+                updateFactor('holiday', fetchHoliday, null, null, INTERVALS.holiday)
+            ]);
+
+            // 交通量ポイントは別途取得
+            const points = await getTrafficPoints(currentLat, currentLon);
+            let trafficFactor;
+            if (points && points.length > 0) {
+                const avg = points.reduce((s,p)=>s+p.volume,0)/points.length;
+                trafficFactor = Math.min(1, avg / DENSITY_MAX);
+                cache.displayStrings.traffic = `${points.length}地点 平均${Math.round(avg)}台/5分 (${trafficFactor.toFixed(2)})`;
+                cache.factors.traffic = trafficFactor;
+            } else {
+                trafficFactor = cache.factors.traffic || 0.5;
+                if (!cache.displayStrings.traffic) cache.displayStrings.traffic = '観測点なし';
+            }
+            elTraffic.textContent = cache.displayStrings.traffic;
+
+            // 統合スコア
+            const factors = {
+                day: dayFactor, weather: weatherFactor, airQuality: airFactor,
+                transport: transportFactor, traffic: trafficFactor, event: eventFactor,
+                poi: poiFactor, news: newsFactor, holiday: holidayFactor
+            };
+            const score = computeScore(factors);
             elScore.textContent = score.toFixed(2);
             elDensityBar.style.width = (score*100)+'%';
 
-            if (points.length > 0) {
+            // 点群更新
+            if (points && points.length > 0) {
                 updatePointsFromReal(points);
             } else {
-                const simCells = generateSimGrid(score);
+                const simCells = generateSimGrid(score, transportFactor);
                 updatePointsFromSim(simCells);
             }
-            updateMinimap(currentLat, currentLon, points);
-            console.log(`✅ 更新完了: スコア=${score.toFixed(2)}`);
+
+            // マップ更新
+            updateMinimap(currentLat, currentLon, points || []);
         }
 
-        let updateTimer, countdownInterval;
-        function startAutoUpdate() {
-            // 初回即実行
-            refreshData().then(() => {
-                countdownSeconds = UPDATE_INTERVAL / 1000;
-                elCountdown.textContent = formatCountdown(countdownSeconds);
-                elStatusIndicator.className = 'indicator';
-            });
-            // 定期更新
-            updateTimer = setInterval(async () => {
-                elStatusIndicator.className = 'indicator warning';
-                await refreshData();
-                countdownSeconds = UPDATE_INTERVAL / 1000; // リセット
-                elCountdown.textContent = formatCountdown(countdownSeconds);
-                elStatusIndicator.className = 'indicator';
-            }, UPDATE_INTERVAL);
-            // カウントダウン (毎秒)
-            countdownInterval = setInterval(() => {
-                countdownSeconds = Math.max(0, countdownSeconds - 1);
-                elCountdown.textContent = formatCountdown(countdownSeconds);
+        function startMainLoop() {
+            mainUpdate(); // 初回即実行
+            mainTimer = setInterval(mainUpdate, MAIN_UPDATE_INTERVAL);
+            // カウントダウン表示更新
+            setInterval(() => {
+                countdown = Math.max(0, countdown - 1);
+                if (countdown === 0) countdown = 10;
+                elCountdown.textContent = countdown;
             }, 1000);
         }
 
-        // アニメーション
+        // ─── アニメーション ──────────────────
         function animate(ts){
             requestAnimationFrame(animate);
             controls.update();
@@ -490,32 +736,22 @@
             renderer.render(scene, camera);
         }
 
-        // リサイズ
         window.addEventListener('resize', ()=>{
             camera.aspect = container.clientWidth/container.clientHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(container.clientWidth, container.clientHeight);
-            pointMat.size = container.clientWidth<400?18:container.clientWidth<600?22:30;
+            pointMat.size = container.clientWidth < 400 ? 22 : container.clientWidth < 600 ? 28 : 42;
         });
 
-        // Geoapify APIキー設定
-        apiKeyApply.addEventListener('click', ()=>{
-            geoapifyKey = apiKeyInput.value.trim();
-            if (geoapifyKey) {
-                elEvent.textContent = 'キー有効 (次回更新時に反映)';
-            }
-        });
-
-        // キー操作
         window.addEventListener('keydown', e=>{
-            if(e.key==='r'){ camera.position.set(1100,850,1300); controls.target.set(0,80,0); controls.update(); }
-            else if(e.key==='t'){ camera.position.set(0,1700,15); controls.target.set(0,0,0); controls.update(); }
-            else if(e.key==='f'){ refreshData(); countdownSeconds=UPDATE_INTERVAL/1000; elCountdown.textContent=formatCountdown(countdownSeconds); }
+            if(e.key==='r'){ camera.position.set(1100,850,1300); controls.target.set(0,0,0); controls.update(); }
+            else if(e.key==='t'){ camera.position.set(0,1800,0); controls.target.set(0,0,0); controls.update(); }
+            else if(e.key==='f'){ mainUpdate(); countdown=10; elCountdown.textContent='10'; }
+            else if(e.key==='m'){ toggleFullMap(); }
         });
 
-        // 起動
-        console.log('🚀 統合人流予測 28.8分更新 | Geoapifyイベント機能');
-        startAutoUpdate();
+        console.log('🚀 統合リアルタイム人流予測 3Dマップ (10秒更新・キャッシュ制御)');
+        startMainLoop();
         requestAnimationFrame(animate);
     </script>
 </body>
