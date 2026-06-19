@@ -1,604 +1,1442 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>人口密度 3D山マップ</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DENSITY.AI — 人口密度推定システム</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+JP:wght@300;400;700&display=swap');
 
-  <!-- MapLibre を mapboxgl として読み込む (deck.gl が参照するため) -->
-  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet">
-  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
-  <script>window.mapboxgl = maplibregl;</script>  <!-- ← deck.gl が mapboxgl を探すためのエイリアス -->
+  :root {
+    --bg-deep: #060912;
+    --bg-panel: #0d1425;
+    --bg-card: #111827;
+    --cyan: #00e5ff;
+    --cyan-dim: #00b8cc;
+    --cyan-glow: rgba(0,229,255,0.15);
+    --amber: #ffb300;
+    --red-hot: #ff3d57;
+    --green-cool: #00ff88;
+    --text-primary: #e8f4f8;
+    --text-secondary: #6b8a9a;
+    --text-mono: 'Share Tech Mono', monospace;
+    --text-body: 'Noto Sans JP', sans-serif;
+    --border: rgba(0,229,255,0.15);
+    --border-bright: rgba(0,229,255,0.4);
+  }
 
-  <!-- deck.gl -->
-  <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
+  body {
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: var(--text-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
 
-  <style>
-    :root {
-      --bg:    #040810;
-      --panel: rgba(4, 10, 24, 0.90);
-      --bdr:   rgba(0, 210, 96, 0.18);
-      --acc:   #00d260;
-      --acc2:  rgba(0, 210, 96, 0.45);
-      --txt:   #b8eecb;
-      --dim:   rgba(184, 238, 203, 0.42);
-      --warn:  #f0a020;
-      --mono:  'Space Mono', monospace;
-      --jp:    'Noto Sans JP', sans-serif;
-    }
-    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-    html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); }
-    #map { position:absolute; inset:0; }
-    .maplibregl-ctrl-bottom-left,
-    .maplibregl-ctrl-bottom-right,
-    .maplibregl-ctrl-top-right { display:none; }
-    body::after  { content:''; position:fixed; inset:0; pointer-events:none; z-index:900; background:repeating-linear-gradient(0deg,transparent 0,transparent 3px,rgba(0,0,0,.03) 3px,rgba(0,0,0,.03) 4px); }
-    body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:901; background:radial-gradient(ellipse at center,transparent 40%,rgba(2,5,18,.7) 100%); }
+  /* Animated starfield background */
+  .starfield {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 20% 30%, rgba(0,50,80,0.3) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 70%, rgba(0,30,60,0.2) 0%, transparent 60%);
+  }
 
-    /* HEADER */
-    #hdr { position:fixed;top:0;left:0;right:0;z-index:50;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to bottom,rgba(4,10,24,.96) 0%,transparent 100%); }
-    .h-title { font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.22em;color:var(--acc);text-transform:uppercase;margin-bottom:3px; }
-    .h-sub   { font-family:var(--jp);font-size:11px;color:var(--dim); }
-    .badge   { display:flex;align-items:center;gap:8px;padding:5px 14px;background:var(--panel);border:1px solid var(--bdr);border-radius:3px;backdrop-filter:blur(10px); }
-    .dot     { width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 8px var(--acc);animation:blink 2.4s ease-in-out infinite; }
-    @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
-    .badge-txt { font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--dim); }
+  .starfield::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 10% 15%, rgba(0,229,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 30% 45%, rgba(255,255,255,0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 55% 20%, rgba(0,229,255,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 75% 60%, rgba(255,255,255,0.15) 0%, transparent 100%),
+      radial-gradient(1px 1px at 90% 35%, rgba(0,229,255,0.25) 0%, transparent 100%),
+      radial-gradient(1px 1px at 20% 80%, rgba(255,255,255,0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 65% 85%, rgba(0,229,255,0.2) 0%, transparent 100%);
+  }
 
-    /* GPS PANEL */
-    #gps-panel { position:fixed;top:60px;left:14px;z-index:50;width:230px;background:var(--panel);border:1px solid var(--bdr);border-radius:4px;backdrop-filter:blur(16px);overflow:hidden; }
-    .gp-sec  { padding:10px 12px;border-bottom:1px solid var(--bdr); }
-    .gp-sec:last-child { border-bottom:none; }
-    .gp-lbl  { font-family:var(--mono);font-size:8px;letter-spacing:.15em;color:var(--acc);text-transform:uppercase;margin-bottom:6px; }
-    .m-badge { display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:2px;font-family:var(--mono);font-size:8px;letter-spacing:.08em;margin-bottom:6px; }
-    .m-badge.gps     { background:rgba(0,210,96,.15);border:1px solid rgba(0,210,96,.35);color:var(--acc); }
-    .m-badge.ip      { background:rgba(240,160,32,.15);border:1px solid rgba(240,160,32,.35);color:var(--warn); }
-    .m-badge.manual  { background:rgba(100,160,255,.15);border:1px solid rgba(100,160,255,.35);color:#88aaff; }
-    .m-badge.wait    { background:rgba(100,100,100,.15);border:1px solid rgba(130,130,130,.3);color:var(--dim);animation:blink 1.2s infinite; }
-    .gp-row  { display:flex;align-items:center;gap:8px;margin-bottom:4px; }
-    .gp-icon { font-size:14px; }
-    .gp-place  { font-family:var(--jp);font-size:11px;color:var(--txt); }
-    .gp-coords { font-family:var(--mono);font-size:8px;color:var(--dim);margin-bottom:2px; }
-    .gp-acc    { font-family:var(--mono);font-size:8px;color:var(--warn); }
-    .gp-btns { display:flex;gap:6px; }
-    .gp-btn  { flex:1;background:rgba(0,210,96,.1);border:1px solid var(--acc2);color:var(--acc);font-family:var(--mono);font-size:8px;letter-spacing:.1em;padding:5px 4px;cursor:pointer;border-radius:3px;text-transform:uppercase;transition:background .2s; }
-    .gp-btn:hover { background:rgba(0,210,96,.22); }
-    .gp-btn:disabled { opacity:.35;cursor:not-allowed; }
-    .gp-btn.ip { color:var(--warn);border-color:rgba(240,160,32,.45);background:rgba(240,160,32,.08); }
-    .gp-btn.ip:hover { background:rgba(240,160,32,.18); }
-    .man-row { display:flex;gap:5px;align-items:center;margin-top:6px; }
-    .man-in  { flex:1;background:rgba(0,0,0,.5);border:1px solid rgba(0,210,96,.2);border-radius:3px;color:var(--txt);font-family:var(--mono);font-size:9px;padding:5px 7px;outline:none; }
-    .man-in:focus { border-color:var(--acc); }
-    .man-in::placeholder { color:var(--dim); }
-    .man-btn { background:rgba(100,160,255,.12);border:1px solid rgba(100,160,255,.4);color:#88aaff;font-family:var(--mono);font-size:8px;padding:5px 8px;cursor:pointer;border-radius:3px;text-transform:uppercase;letter-spacing:.08em; }
-    .man-btn:hover { background:rgba(100,160,255,.22); }
-    .gp-hint { font-family:var(--jp);font-size:9px;color:var(--dim);margin-top:5px;line-height:1.5; }
+  .app-wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px; margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
 
-    /* STATS */
-    #stats { position:fixed;top:60px;right:14px;width:216px;z-index:50;background:var(--panel);border:1px solid var(--bdr);border-radius:4px;backdrop-filter:blur(16px);overflow:hidden; }
-    .p-hd  { padding:7px 12px;font-family:var(--mono);font-size:8px;letter-spacing:.18em;color:var(--acc);text-transform:uppercase;border-bottom:1px solid var(--bdr); }
-    .r-row { display:flex;align-items:center;gap:6px;padding:5px 12px;border-bottom:1px solid rgba(0,210,96,.07);transition:background .2s; }
-    .r-row:last-child { border-bottom:none; }
-    .r-row:hover { background:rgba(0,210,96,.04); }
-    .r-n  { font-family:var(--mono);font-size:8px;color:var(--dim);width:13px; }
-    .r-w  { flex:1;font-family:var(--jp);font-size:11px;color:var(--txt); }
-    .r-bar { display:flex;align-items:center;gap:5px; }
-    .bar-bg { width:36px;height:2px;background:rgba(255,255,255,.09);border-radius:1px; }
-    .bar-fg { height:100%;border-radius:1px;transition:width 1.2s ease; }
-    .r-v  { font-family:var(--mono);font-size:9px;color:var(--dim);width:42px;text-align:right; }
+  /* HEADER */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 32px; padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
 
-    /* LEGEND */
-    #legend { position:fixed;bottom:50px;left:14px;z-index:50;background:var(--panel);border:1px solid var(--bdr);border-radius:4px;padding:10px 14px;backdrop-filter:blur(16px); }
-    .l-title { font-family:var(--mono);font-size:8px;letter-spacing:.15em;color:var(--acc);margin-bottom:7px; }
-    .l-bar   { width:150px;height:8px;border-radius:4px;margin-bottom:5px;background:linear-gradient(to right,#18b454,#9ed010,#f09018,#e02020); }
-    .l-lbs   { display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;color:var(--dim); }
+  .logo-mark {
+    width: 40px; height: 40px;
+    border: 2px solid var(--cyan);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 16px var(--cyan-glow), inset 0 0 12px var(--cyan-glow);
+    animation: pulse-logo 3s ease-in-out infinite;
+  }
 
-    /* STATUS BAR */
-    #prog      { position:fixed;bottom:38px;left:0;right:0;height:2px;z-index:50;background:rgba(0,210,96,.07); }
-    #prog-fill { height:100%;background:linear-gradient(to right,var(--acc),rgba(0,210,96,.35));box-shadow:0 0 8px var(--acc);transition:width 1s linear; }
-    #sbar { position:fixed;bottom:0;left:0;right:0;height:38px;z-index:50;background:rgba(4,10,24,.97);border-top:1px solid var(--bdr);display:flex;align-items:center;padding:0 16px;gap:22px; }
-    .s-it { display:flex;align-items:center;gap:6px; }
-    .s-l  { font-family:var(--mono);font-size:8px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase; }
-    .s-v  { font-family:var(--mono);font-size:10px;color:var(--txt); }
-    .s-a  { font-family:var(--mono);font-size:10px;color:var(--acc); }
+  @keyframes pulse-logo {
+    0%,100% { box-shadow: 0 0 16px var(--cyan-glow), inset 0 0 12px var(--cyan-glow); }
+    50% { box-shadow: 0 0 32px rgba(0,229,255,0.4), inset 0 0 20px rgba(0,229,255,0.3); }
+  }
 
-    /* LOADING */
-    #loading { position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .8s ease; }
-    #loading.fade { opacity:0;pointer-events:none; }
-    .ld-t { font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--acc);text-transform:uppercase; }
-    .ld-bw { width:240px;height:2px;background:rgba(0,210,96,.1);border-radius:1px; }
-    .ld-b  { height:100%;border-radius:1px;background:var(--acc);box-shadow:0 0 8px var(--acc);width:0;transition:width .15s linear; }
-    .ld-s  { font-family:var(--jp);font-size:10px;color:var(--dim); }
-  </style>
+  .logo-mark svg { width: 22px; height: 22px; }
+
+  .header-text h1 {
+    font-family: var(--text-mono);
+    font-size: 1.1rem;
+    letter-spacing: 0.15em;
+    color: var(--cyan);
+    text-shadow: 0 0 20px rgba(0,229,255,0.5);
+  }
+
+  .header-text p {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+  }
+
+  .header-status {
+    margin-left: auto;
+    font-family: var(--text-mono);
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-align: right;
+  }
+
+  .status-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--cyan);
+    margin-right: 6px;
+    animation: blink 2s ease-in-out infinite;
+  }
+
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+  /* SCAN BUTTON */
+  .scan-section {
+    text-align: center; margin-bottom: 32px;
+  }
+
+  .scan-btn {
+    position: relative;
+    background: transparent;
+    border: 2px solid var(--cyan);
+    color: var(--cyan);
+    font-family: var(--text-mono);
+    font-size: 0.95rem;
+    letter-spacing: 0.2em;
+    padding: 16px 48px;
+    border-radius: 4px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+  }
+
+  .scan-btn::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: var(--cyan-glow);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .scan-btn:hover::before { transform: translateX(0); }
+  .scan-btn:hover {
+    box-shadow: 0 0 32px rgba(0,229,255,0.3);
+    text-shadow: 0 0 8px var(--cyan);
+  }
+
+  .scan-btn:disabled {
+    opacity: 0.4; cursor: not-allowed;
+  }
+
+  .scan-btn span { position: relative; z-index: 1; }
+
+  /* SCANNING ANIMATION */
+  .scanning-overlay {
+    display: none;
+    text-align: center; padding: 40px 0;
+  }
+
+  .scanning-overlay.active { display: block; }
+
+  .radar-container {
+    width: 120px; height: 120px;
+    margin: 0 auto 20px;
+    position: relative;
+  }
+
+  .radar-ring {
+    position: absolute; inset: 0;
+    border: 2px solid rgba(0,229,255,0.2);
+    border-radius: 50%;
+    animation: radar-expand 2s ease-out infinite;
+  }
+
+  .radar-ring:nth-child(2) { animation-delay: 0.7s; }
+  .radar-ring:nth-child(3) { animation-delay: 1.4s; }
+
+  @keyframes radar-expand {
+    0% { transform: scale(0.3); opacity: 0.8; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+
+  .radar-core {
+    position: absolute; inset: 30px;
+    border: 2px solid var(--cyan);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .radar-sweep {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 270deg, rgba(0,229,255,0.4) 360deg);
+    animation: radar-sweep 2s linear infinite;
+  }
+
+  @keyframes radar-sweep { to { transform: rotate(360deg); } }
+
+  .scanning-text {
+    font-family: var(--text-mono);
+    font-size: 0.8rem;
+    color: var(--cyan);
+    letter-spacing: 0.15em;
+    animation: blink 1s ease-in-out infinite;
+  }
+
+  .scanning-log {
+    margin-top: 12px;
+    font-family: var(--text-mono);
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    max-height: 80px;
+    overflow: hidden;
+    line-height: 1.8;
+  }
+
+  /* ERROR BOX */
+  .error-box {
+    display: none;
+    background: rgba(255,61,87,0.08);
+    border: 1px solid rgba(255,61,87,0.3);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    font-size: 0.85rem;
+    color: #ff8a9a;
+  }
+  .error-box.active { display: block; }
+
+  /* RESULTS */
+  #results {
+    display: none;
+    animation: fade-in 0.6s ease;
+  }
+  #results.active { display: block; }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* DENSITY GAUGE — HERO */
+  .density-hero {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    margin-bottom: 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .density-hero::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  }
+
+  .density-label {
+    font-family: var(--text-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .density-number {
+    font-family: var(--text-mono);
+    font-size: clamp(2.5rem, 8vw, 4.5rem);
+    font-weight: bold;
+    line-height: 1;
+    margin-bottom: 8px;
+    transition: color 0.5s ease;
+  }
+
+  .density-unit {
+    font-family: var(--text-mono);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+  }
+
+  /* Heatmap bar */
+  .heatmap-bar-wrapper {
+    max-width: 400px; margin: 0 auto 12px;
+  }
+
+  .heatmap-bar {
+    height: 12px; border-radius: 6px;
+    background: linear-gradient(90deg,
+      #0d47a1 0%, #1565c0 10%, #0288d1 25%,
+      #00bcd4 40%, #4caf50 55%,
+      #ffeb3b 70%, #ff9800 82%, #f44336 92%, #b71c1c 100%
+    );
+    position: relative; margin-bottom: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .heatmap-needle {
+    position: absolute; top: -4px;
+    width: 4px; height: 20px;
+    background: white;
+    border-radius: 2px;
+    transform: translateX(-50%);
+    box-shadow: 0 0 8px rgba(255,255,255,0.8);
+    transition: left 1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .heatmap-ticks {
+    display: flex; justify-content: space-between;
+    font-family: var(--text-mono); font-size: 0.6rem;
+    color: var(--text-secondary);
+  }
+
+  .density-category {
+    font-size: 0.8rem; font-weight: 700;
+    letter-spacing: 0.1em;
+    margin-top: 12px;
+  }
+
+  .confidence-badge {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-family: var(--text-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    border: 1px solid currentColor;
+  }
+
+  /* GRID LAYOUT */
+  .data-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  @media (max-width: 600px) { .data-grid { grid-template-columns: 1fr; } }
+
+  .data-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s ease;
+  }
+
+  .data-card:hover { border-color: var(--border-bright); }
+
+  .data-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0;
+    width: 3px; height: 100%;
+    background: var(--accent, var(--cyan));
+    opacity: 0.6;
+  }
+
+  .card-icon {
+    font-size: 1.4rem; margin-bottom: 8px;
+    display: block;
+  }
+
+  .card-title {
+    font-family: var(--text-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .card-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.4;
+  }
+
+  .card-sub {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  /* ANALYSIS PANEL */
+  .analysis-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .analysis-panel::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  }
+
+  .panel-title {
+    font-family: var(--text-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .panel-title::before {
+    content: '//';
+    opacity: 0.5;
+  }
+
+  .analysis-text {
+    font-size: 0.88rem;
+    line-height: 1.8;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+  }
+
+  /* FACTORS LIST */
+  .factors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .factor-item {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.78rem;
+  }
+
+  .factor-name {
+    font-family: var(--text-mono);
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+
+  .factor-val {
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .factor-weight {
+    display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  }
+
+  .weight-bar {
+    flex: 1; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px;
+  }
+
+  .weight-fill {
+    height: 100%; border-radius: 2px;
+    background: var(--cyan);
+    transition: width 1.2s ease;
+  }
+
+  .weight-pct {
+    font-family: var(--text-mono);
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    min-width: 28px; text-align: right;
+  }
+
+  /* DENSITY VISUAL MAP */
+  .visual-map {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .map-title {
+    font-family: var(--text-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  #density-canvas {
+    width: 100%;
+    border-radius: 8px;
+    display: block;
+  }
+
+  /* REAL MAP (Leaflet) */
+  #real-map {
+    width: 100%;
+    height: 320px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+  }
+
+  /* Counter-invert popups/markers so they stay readable */
+  #real-map .leaflet-popup-content-wrapper,
+  #real-map .leaflet-popup-tip {
+    filter: invert(1) hue-rotate(180deg);
+  }
+
+  .map-legend {
+    display: flex; align-items: center; gap: 16px;
+    margin-top: 12px;
+    font-family: var(--text-mono);
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+  }
+
+  .map-legend-item {
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .map-legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* LOCATION INFO */
+  .location-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    font-family: var(--text-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .loc-dot { color: var(--cyan); font-size: 1rem; }
+  .loc-coords { color: var(--text-primary); }
+  .loc-time { margin-left: auto; }
+
+  /* RESCAN */
+  .rescan-btn {
+    display: block; width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--text-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    padding: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+
+  .rescan-btn:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg-deep); }
+  ::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.2); border-radius: 3px; }
+</style>
 </head>
 <body>
 
-<div id="loading">
-  <div class="ld-t">Population Density Monitor</div>
-  <div class="ld-bw"><div class="ld-b" id="ld-b"></div></div>
-  <div class="ld-s" id="ld-s">初期化中…</div>
-</div>
+<div class="starfield"></div>
 
-<div id="map"></div>
-
-<header id="hdr">
-  <div>
-    <div class="h-title">Population Density · Mountain View</div>
-    <div class="h-sub">人口密度 3D 可視化 / Google PDI · GPS 連動</div>
-  </div>
-  <div class="badge"><div class="dot"></div><span class="badge-txt" id="live-st">DEMO · SIMULATION</span></div>
-</header>
-
-<div id="gps-panel">
-  <div class="gp-sec">
-    <div class="gp-lbl">LOCATION</div>
-    <div id="m-badge" class="m-badge wait">⟳ &nbsp;取得中…</div>
-    <div class="gp-row"><span class="gp-icon" id="gp-icon">📡</span><span class="gp-place" id="gp-place">—</span></div>
-    <div class="gp-coords" id="gp-coords">— , —</div>
-    <div class="gp-acc" id="gp-acc"></div>
-  </div>
-  <div class="gp-sec">
-    <div class="gp-btns">
-      <button class="gp-btn" id="btn-gps" onclick="tryGPS()" disabled>📍 GPS</button>
-      <button class="gp-btn ip" id="btn-ip" onclick="tryIP()" disabled>🌐 IP位置情報</button>
+<div class="app-wrapper">
+  <header>
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#00e5ff" stroke-width="1.5">
+        <circle cx="12" cy="12" r="3"/>
+        <circle cx="12" cy="12" r="7" stroke-dasharray="3 2"/>
+        <circle cx="12" cy="12" r="11" stroke-dasharray="2 3"/>
+        <line x1="12" y1="1" x2="12" y2="5"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="1" y1="12" x2="5" y2="12"/>
+        <line x1="19" y1="12" x2="23" y2="12"/>
+      </svg>
     </div>
-  </div>
-  <div class="gp-sec">
-    <div class="gp-lbl">手動入力</div>
-    <div class="man-row">
-      <input class="man-in" id="man-in" type="text" placeholder="35.6895, 139.6917">
-      <button class="man-btn" onclick="applyManual()">SET</button>
+    <div class="header-text">
+      <h1>DENSITY.AI</h1>
+      <p>POPULATION DENSITY ESTIMATION SYSTEM</p>
     </div>
-    <div class="gp-hint">緯度, 経度 の形式で入力</div>
+    <div class="header-status">
+      <span class="status-dot"></span>ONLINE<br>
+      <span id="current-time" style="font-size:0.65rem;">--:--:--</span>
+    </div>
+  </header>
+
+  <div class="scan-section">
+    <button class="scan-btn" id="scan-btn" onclick="startScan()">
+      <span>📡 現在地をスキャン</span>
+    </button>
+    <p style="margin-top:12px; font-size:0.75rem; color:var(--text-secondary);">
+      位置・気象・建物・交通・統計データを統合し、ブラウザ内蔵アルゴリズムで推定します
+    </p>
   </div>
-</div>
 
-<aside id="stats">
-  <div class="p-hd">周辺 密度ランキング</div>
-  <div id="rank-list"></div>
-</aside>
+  <div class="scanning-overlay" id="scanning">
+    <div class="radar-container">
+      <div class="radar-ring"></div>
+      <div class="radar-ring"></div>
+      <div class="radar-ring"></div>
+      <div class="radar-core">
+        <div class="radar-sweep"></div>
+      </div>
+    </div>
+    <div class="scanning-text">SCANNING...</div>
+    <div class="scanning-log" id="scan-log"></div>
+  </div>
 
-<div id="legend">
-  <div class="l-title">人口密度 · 人 / km²</div>
-  <div class="l-bar"></div>
-  <div class="l-lbs"><span>低 0</span><span>5k</span><span>10k</span><span>20k+ 高</span></div>
-</div>
+  <div class="error-box" id="error-box"></div>
 
-<div id="prog"><div id="prog-fill" style="width:100%"></div></div>
-<div id="sbar">
-  <div class="s-it"><span class="s-l">SOURCE</span><span class="s-v" id="sb-src">SIMULATION</span></div>
-  <div class="s-it"><span class="s-l">CENTER</span><span class="s-v" id="sb-loc">—</span></div>
-  <div class="s-it"><span class="s-l">UPDATED</span><span class="s-v" id="sb-time">—</span></div>
-  <div class="s-it"><span class="s-l">NEXT IN</span><span class="s-a" id="sb-next">30s</span></div>
-  <div class="s-it"><span class="s-l">CELLS</span><span class="s-v" id="sb-cells">—</span></div>
+  <div id="results">
+    <div class="location-bar">
+      <span class="loc-dot">◉</span>
+      <span class="loc-coords" id="loc-display">---</span>
+      <span class="loc-time" id="scan-time">---</span>
+    </div>
+
+    <div class="density-hero" id="density-hero">
+      <div class="density-label">推定人口密度 / ESTIMATED POPULATION DENSITY</div>
+      <div class="density-number" id="density-number">---</div>
+      <div class="density-unit">人 / km²</div>
+      <div class="heatmap-bar-wrapper">
+        <div class="heatmap-bar">
+          <div class="heatmap-needle" id="heatmap-needle" style="left:0%"></div>
+        </div>
+        <div class="heatmap-ticks">
+          <span>過疎</span><span>農村</span><span>郊外</span><span>都市</span><span>高密度</span><span>超高密度</span>
+        </div>
+      </div>
+      <div class="density-category" id="density-category">---</div>
+      <div class="confidence-badge" id="confidence-badge">---</div>
+    </div>
+
+    <div class="data-grid" id="data-grid"></div>
+
+    <div class="visual-map">
+      <div class="map-title">// LIVE MAP — 現在地・解析範囲</div>
+      <div id="real-map"></div>
+      <div class="map-legend">
+        <div class="map-legend-item"><span class="map-legend-dot" style="background:#00e5ff"></span>現在地</div>
+        <div class="map-legend-item"><span class="map-legend-dot" style="background:rgba(255,87,34,0.4); border:1px solid #ff5722;"></span>解析範囲（半径500m）</div>
+      </div>
+    </div>
+
+    <div class="visual-map">
+      <div class="map-title">// DENSITY VISUALIZATION — HEATMAP GRID</div>
+      <canvas id="density-canvas" height="200"></canvas>
+    </div>
+
+    <div class="analysis-panel">
+      <div class="panel-title">AI ANALYSIS REPORT</div>
+      <div class="analysis-text" id="analysis-text">分析中...</div>
+    </div>
+
+    <div class="analysis-panel" style="--accent-line: var(--cyan)">
+      <div class="panel-title" style="color:var(--cyan)">CONTRIBUTING FACTORS</div>
+      <div class="factors-grid" id="factors-grid"></div>
+    </div>
+
+    <button class="rescan-btn" onclick="resetApp()">↺ 再スキャン</button>
+  </div>
 </div>
 
 <script>
-'use strict';
-
-// ══════════════════════════════════════════════════════
-//  定数
-// ══════════════════════════════════════════════════════
-const MAX_D       = 24000;
-const CELL_R      = 145;
-const GRID_DLAT   = 0.0028;
-const GRID_DLNG   = 0.0034;
-const GRID_RADIUS = 0.20;
-const INTERVAL_S  = 30;
-
-// ══════════════════════════════════════════════════════
-//  人口密度センターデータ
-// ══════════════════════════════════════════════════════
-const CENTERS = [
-  // 東京23区
-  {n:'豊島区',    a:35.7295,o:139.7109,d:22000,s:0.018},
-  {n:'中野区',    a:35.7074,o:139.6637,d:21000,s:0.017},
-  {n:'荒川区',    a:35.7351,o:139.7832,d:20600,s:0.015},
-  {n:'墨田区',    a:35.7139,o:139.8012,d:19800,s:0.017},
-  {n:'台東区',    a:35.7118,o:139.7825,d:19500,s:0.014},
-  {n:'文京区',    a:35.7069,o:139.7523,d:18700,s:0.016},
-  {n:'品川区',    a:35.6094,o:139.7303,d:18000,s:0.025},
-  {n:'板橋区',    a:35.7511,o:139.7197,d:17300,s:0.025},
-  {n:'新宿区',    a:35.6939,o:139.7034,d:17100,s:0.018},
-  {n:'北区',      a:35.7527,o:139.7337,d:16500,s:0.022},
-  {n:'渋谷区',    a:35.6635,o:139.6985,d:15800,s:0.018},
-  {n:'足立区',    a:35.7757,o:139.8044,d:15600,s:0.035},
-  {n:'葛飾区',    a:35.7439,o:139.8472,d:14200,s:0.028},
-  {n:'江戸川区',  a:35.7069,o:139.8686,d:13400,s:0.032},
-  {n:'杉並区',    a:35.6994,o:139.6368,d:13000,s:0.028},
-  {n:'港区',      a:35.6581,o:139.7514,d:12500,s:0.020},
-  {n:'目黒区',    a:35.6423,o:139.6983,d:12300,s:0.018},
-  {n:'大田区',    a:35.5613,o:139.7160,d:11500,s:0.036},
-  {n:'世田谷区',  a:35.6467,o:139.6531,d:11200,s:0.035},
-  {n:'練馬区',    a:35.7357,o:139.6528,d:10800,s:0.030},
-  {n:'江東区',    a:35.6726,o:139.8175,d:10500,s:0.030},
-  {n:'中央区',    a:35.6702,o:139.7730,d: 5700,s:0.015},
-  {n:'千代田区',  a:35.6938,o:139.7532,d: 4400,s:0.012},
-  // 主要駅・商業地区
-  {n:'池袋',       a:35.7295,o:139.7109,d:24000,s:0.008},
-  {n:'新宿駅周辺', a:35.6896,o:139.7006,d:23000,s:0.007},
-  {n:'渋谷駅周辺', a:35.6580,o:139.7016,d:21000,s:0.007},
-  {n:'上野',       a:35.7141,o:139.7774,d:20000,s:0.008},
-  {n:'大久保',     a:35.7019,o:139.6995,d:22000,s:0.007},
-  {n:'高円寺',     a:35.7053,o:139.6499,d:20500,s:0.007},
-  {n:'三軒茶屋',   a:35.6436,o:139.6699,d:18000,s:0.007},
-  {n:'錦糸町',     a:35.6960,o:139.8154,d:19000,s:0.008},
-  {n:'北千住',     a:35.7494,o:139.8007,d:20000,s:0.008},
-  {n:'蒲田',       a:35.5636,o:139.7162,d:19000,s:0.008},
-  {n:'秋葉原',     a:35.7022,o:139.7741,d:16000,s:0.006},
-  {n:'吉祥寺',     a:35.7030,o:139.5797,d:14000,s:0.008},
-  {n:'蕨市',       a:35.8235,o:139.6804,d:14000,s:0.010},
-  // 東京市部
-  {n:'立川市',     a:35.6968,o:139.4138,d:6800,s:0.022},
-  {n:'西東京市',   a:35.7257,o:139.5383,d:7200,s:0.018},
-  {n:'三鷹市',     a:35.6834,o:139.5596,d:7500,s:0.015},
-  {n:'小金井市',   a:35.6993,o:139.5130,d:8500,s:0.012},
-  {n:'八王子市',   a:35.6660,o:139.3160,d:2800,s:0.050},
-  {n:'町田市',     a:35.5428,o:139.4460,d:4300,s:0.035},
-  // 神奈川県
-  {n:'横浜市',     a:35.4437,o:139.6380,d:8500,s:0.080},
-  {n:'横浜・鶴見', a:35.5176,o:139.6795,d:11000,s:0.018},
-  {n:'川崎市',     a:35.5308,o:139.7029,d:10500,s:0.050},
-  {n:'川崎区',     a:35.5311,o:139.7031,d:13000,s:0.015},
-  {n:'相模原市',   a:35.5713,o:139.3730,d:2200,s:0.060},
-  {n:'藤沢市',     a:35.3383,o:139.4916,d:3800,s:0.035},
-  {n:'大和市',     a:35.4592,o:139.4627,d:5000,s:0.020},
-  // 埼玉県
-  {n:'さいたま市', a:35.8617,o:139.6455,d:6100,s:0.060},
-  {n:'浦和',       a:35.8572,o:139.6455,d:9000,s:0.018},
-  {n:'大宮',       a:35.9063,o:139.6235,d:8500,s:0.018},
-  {n:'川口市',     a:35.8069,o:139.7241,d:9000,s:0.035},
-  {n:'草加市',     a:35.8277,o:139.8074,d:7000,s:0.022},
-  {n:'越谷市',     a:35.8898,o:139.7908,d:4500,s:0.028},
-  // 千葉県
-  {n:'千葉市',     a:35.6074,o:140.1065,d:3600,s:0.062},
-  {n:'千葉・稲毛', a:35.6363,o:140.1017,d:6000,s:0.018},
-  {n:'船橋市',     a:35.6946,o:139.9831,d:7400,s:0.035},
-  {n:'市川市',     a:35.7210,o:139.9316,d:8200,s:0.026},
-  {n:'松戸市',     a:35.7878,o:139.9026,d:8000,s:0.028},
-  {n:'浦安市',     a:35.6551,o:139.9058,d:8000,s:0.014},
-  {n:'柏市',       a:35.8677,o:139.9751,d:3700,s:0.035},
-  // 茨城県
-  {n:'水戸市',         a:36.3418,o:140.4468,d:1200,s:0.038},
-  {n:'水戸中心部',     a:36.3655,o:140.4710,d:2200,s:0.012},
-  {n:'ひたちなか市',   a:36.3964,o:140.5347,d:1630,s:0.024},
-  {n:'ひたちなか勝田', a:36.3851,o:140.5340,d:2400,s:0.009},
-  {n:'つくば市',       a:36.0833,o:140.0769,d: 850,s:0.048},
-  {n:'つくば研究学園', a:36.0825,o:140.1125,d:1500,s:0.012},
-  {n:'日立市',         a:36.5994,o:140.6514,d: 800,s:0.040},
-  {n:'土浦市',         a:36.0800,o:140.2040,d:1100,s:0.028},
-  {n:'古河市',         a:36.1942,o:139.7083,d:1150,s:0.028},
-  {n:'守谷市',         a:35.9500,o:139.9760,d:2000,s:0.022},
-  {n:'取手市',         a:35.9112,o:140.0557,d:1800,s:0.024},
-  {n:'牛久市',         a:35.9779,o:140.1494,d:1400,s:0.022},
-  {n:'龍ケ崎市',       a:35.9121,o:140.1829,d:1000,s:0.024},
-  {n:'鹿嶋市',         a:35.9660,o:140.6446,d: 550,s:0.022},
-  // 栃木・群馬
-  {n:'宇都宮市',   a:36.5549,o:139.8832,d:1250,s:0.055},
-  {n:'小山市',     a:36.3149,o:139.8026,d:1200,s:0.028},
-  {n:'前橋市',     a:36.3895,o:139.0634,d:1080,s:0.045},
-  {n:'高崎市',     a:36.3226,o:139.0030,d: 810,s:0.055},
-  // 東北・主要都市
-  {n:'いわき市',   a:37.0508,o:140.8878,d: 350,s:0.055},
-  {n:'郡山市',     a:37.3937,o:140.3847,d: 700,s:0.045},
-  {n:'仙台市',     a:38.2688,o:140.8721,d:1450,s:0.075},
-  {n:'大阪市',     a:34.6937,o:135.5023,d:12000,s:0.075},
-  {n:'名古屋市',   a:35.1815,o:136.9066,d: 7000,s:0.075},
-  {n:'札幌市',     a:43.0642,o:141.3469,d: 1800,s:0.085},
-  {n:'福岡市',     a:33.5904,o:130.4017,d: 4500,s:0.068},
-];
-
-// ══════════════════════════════════════════════════════
-//  色計算 (緑→黄→赤)
-// ══════════════════════════════════════════════════════
-function hsl2rgb(h, s, l) {
-  const a = s * Math.min(l, 1 - l);
-  const f = n => { const k=(n+h/30)%12; return l-a*Math.max(Math.min(k-3,9-k,1),-1); };
-  return [Math.round(f(0)*255), Math.round(f(8)*255), Math.round(f(4)*255)];
+// ─── Clock ───────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('current-time').textContent =
+    now.toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
-function dColor(d) {
-  const t = Math.min(Math.max(d / MAX_D, 0), 1);
-  return [...hsl2rgb((1-t)*128, 0.72+t*0.20, 0.37+(1-Math.pow(2*t-1,2))*0.08), 220];
+setInterval(updateClock, 1000);
+updateClock();
+
+// ─── Log helper ──────────────────────────────────────────────────────────────
+const logLines = [];
+function addLog(msg) {
+  logLines.push(`> ${msg}`);
+  if (logLines.length > 5) logLines.shift();
+  document.getElementById('scan-log').textContent = logLines.join('\n');
 }
 
-// ══════════════════════════════════════════════════════
-//  密度モデル (ガウス混合)
-// ══════════════════════════════════════════════════════
-let noisePhase = 0;
-function density(lat, lng) {
-  let ws=0, ds=0;
-  for (const c of CENTERS) {
-    const dy=lat-c.a, dx=(lng-c.o)*0.808;
-    const w = Math.exp(-(dy*dy+dx*dx)/(2*c.s*c.s));
-    ws+=w; ds+=w*c.d;
+// ─── Weather fetch ────────────────────────────────────────────────────────────
+async function fetchWeather(lat, lon) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,cloud_cover,precipitation,surface_pressure&timezone=auto`;
+    const r = await fetch(url);
+    const d = await r.json();
+    return d.current;
+  } catch(e) {
+    return null;
   }
-  const base = ws > 1e-5 ? ds/ws : 60;
-  const noise = Math.sin(lat*173.1+noisePhase*6.1)*Math.cos(lng*257.7+noisePhase*2.9);
-  return Math.max(50, Math.min(MAX_D, base*(1+0.04*noise)));
 }
-function nearest(lat, lng) {
-  let best=CENTERS[0], bd=Infinity;
-  for (const c of CENTERS) {
-    const d=Math.hypot(lat-c.a,(lng-c.o)*0.808);
-    if(d<bd){bd=d;best=c;}
+
+// ─── Reverse geocode ─────────────────────────────────────────────────────────
+async function reverseGeocode(lat, lon) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ja`;
+    const r = await fetch(url, {headers:{'User-Agent':'DensityAI/1.0'}});
+    const d = await r.json();
+    return d.address || {};
+  } catch(e) {
+    return {};
   }
-  return best.n;
 }
 
-// ══════════════════════════════════════════════════════
-//  グリッド生成
-// ══════════════════════════════════════════════════════
-let userLat=35.6895, userLng=139.6917;
+// ─── Weather code → description ───────────────────────────────────────────────
+function weatherDesc(code) {
+  if (code === 0) return '快晴';
+  if (code <= 3) return '晴れ/曇り';
+  if (code <= 9) return '霧/靄';
+  if (code <= 19) return '降水';
+  if (code <= 29) return '雷雨の可能性';
+  if (code <= 39) return '砂嵐';
+  if (code <= 49) return '霧';
+  if (code <= 59) return '霧雨';
+  if (code <= 69) return '雨';
+  if (code <= 79) return '雪';
+  if (code <= 84) return '雨/雪';
+  if (code <= 94) return '雷雨';
+  return '激しい雷雨';
+}
 
-function buildGrid() {
-  const pts=[];
-  let row=0;
-  for (let la=userLat-GRID_RADIUS; la<=userLat+GRID_RADIUS; la+=GRID_DLAT, row++) {
-    const off=(row&1)?GRID_DLNG*0.5:0;
-    for (let lo=userLng-GRID_RADIUS*1.3+off; lo<=userLng+GRID_RADIUS*1.3; lo+=GRID_DLNG) {
-      pts.push({la, lo, d:density(la,lo), n:nearest(la,lo)});
-    }
+// ─── 日本 都道府県別 人口密度統計（人/km², 概算値） ─────────────────────────────
+// 国土交通省・総務省統計局の公表値を基にした概算テーブル。広域補正の基礎データとして使用。
+const PREFECTURE_DENSITY = {
+  '北海道': 64, '青森県': 124, '岩手県': 78, '宮城県': 310, '秋田県': 79,
+  '山形県': 113, '福島県': 130, '茨城県': 469, '栃木県': 301, '群馬県': 303,
+  '埼玉県': 1934, '千葉県': 1218, '東京都': 6402, '神奈川県': 3791, '新潟県': 174,
+  '富山県': 245, '石川県': 267, '福井県': 184, '山梨県': 178, '長野県': 150,
+  '岐阜県': 184, '静岡県': 469, '愛知県': 1450, '三重県': 305, '滋賀県': 351,
+  '京都府': 559, '大阪府': 4619, '兵庫県': 648, '奈良県': 358, '和歌山県': 196,
+  '鳥取県': 158, '島根県': 99, '岡山県': 264, '広島県': 327, '山口県': 217,
+  '徳島県': 174, '香川県': 504, '愛媛県': 230, '高知県': 98, '福岡県': 1024,
+  '佐賀県': 332, '長崎県': 314, '熊本県': 233, '大分県': 178, '宮崎県': 138,
+  '鹿児島県': 174, '沖縄県': 643
+};
+
+// 政令指定都市・特別区など、都道府県平均より大幅に高い既知の高密度都市部
+const KNOWN_HIGH_DENSITY_CITIES = {
+  '横浜市': 8500, '大阪市': 12300, '名古屋市': 7400, '札幌市': 1700,
+  '福岡市': 4700, '川崎市': 10900, '神戸市': 2700, '京都市': 1800,
+  'さいたま市': 6100, '広島市': 1320, '仙台市': 1370, '北九州市': 1900,
+  '千葉市': 3700, '堺市': 5500, '新潟市': 1050, '浜松市': 480,
+  '熊本市': 1900, '相模原市': 2300, '岡山市': 920, '静岡市': 470
+};
+
+function lookupPrefectureDensity(addr) {
+  const pref = addr.state || '';
+  return PREFECTURE_DENSITY[pref] || null;
+}
+
+function lookupCityDensity(addr) {
+  const city = addr.city || '';
+  for (const key in KNOWN_HIGH_DENSITY_CITIES) {
+    if (city.includes(key)) return KNOWN_HIGH_DENSITY_CITIES[key];
   }
-  return pts;
+  return null;
 }
 
-// ══════════════════════════════════════════════════════
-//  高さスケール (1.25乗で差を強調)
-// ══════════════════════════════════════════════════════
-function elev(d) {
-  return Math.pow(Math.min(d/MAX_D,1), 1.25) * 9000 + 30;
-}
-
-// ══════════════════════════════════════════════════════
-//  deck.gl 初期化
-//  ★ DeckGL standalone + mapStyle でシンプルに統合
-// ══════════════════════════════════════════════════════
-let gl = null;
-let userPt = [];  // GPS マーカー用
-
-function makeLayers(pts) {
-  return [
-    // 人口密度柱
-    new deck.ColumnLayer({
-      id: 'pop',
-      data: pts,
-      diskResolution: 6,
-      radius: CELL_R,
-      extruded: true,
-      pickable: true,
-      elevationScale: 1,
-      getPosition:  d => [d.lo, d.la],
-      getElevation: d => elev(d.d),
-      getFillColor: d => dColor(d.d),
-      material: { ambient:0.35, diffuse:0.70, shininess:100, specularColor:[60,60,60] },
-      transitions: { getElevation:{duration:900}, getFillColor:{duration:700} },
-    }),
-    // 現在地マーカー
-    new deck.ScatterplotLayer({
-      id: 'user',
-      data: userPt,
-      getPosition: d => [d.lo, d.la],
-      getRadius: 350,
-      radiusMinPixels: 8,
-      getFillColor: [0, 210, 96, 220],
-      getLineColor: [255, 255, 255, 255],
-      stroked: true,
-      lineWidthMinPixels: 2,
-    }),
+// ─── 祝日判定（簡易版：固定祝日のみ。移動祝日は近似） ─────────────────────────────
+function isJapaneseHoliday(date) {
+  const m = date.getMonth() + 1, d = date.getDate();
+  const fixedHolidays = [
+    [1,1],[2,11],[2,23],[4,29],[5,3],[5,4],[5,5],[8,11],[11,3],[11,23]
   ];
+  return fixedHolidays.some(([fm, fd]) => fm === m && fd === d);
 }
 
-function initDeck() {
-  gl = new deck.DeckGL({
-    container: 'map',
-    mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-    initialViewState: {
-      longitude: userLng,
-      latitude:  userLat,
-      zoom: 10.4,
-      pitch: 62,
-      bearing: -14,
-      maxPitch: 85,
-    },
-    controller: true,
-    layers: makeLayers([]),
-    getTooltip: ({object}) => object && ({
-      html: `<div style="font-family:'Space Mono',monospace;font-size:11px;color:#b8eecb;line-height:1.9">
-        <div style="font-size:9px;color:#00d260;letter-spacing:.12em;margin-bottom:2px">▍ ${object.n}</div>
-        <span style="font-size:15px;font-weight:700">${Math.round(object.d).toLocaleString('ja-JP')}</span>
-        <span style="color:rgba(184,238,203,.45);font-size:10px"> 人/km²</span></div>`,
-      style: { background:'rgba(4,10,24,.96)', border:'1px solid rgba(0,210,96,.4)', borderRadius:'4px', padding:'9px 13px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' },
-    }),
+// ─── Overpass API: 周辺の建物・交通・商業施設を実数カウント ─────────────────────
+async function fetchOverpassData(lat, lon) {
+  const radius = 500; // メートル
+  const query = `
+[out:json][timeout:12];
+(
+  way["building"](around:${radius},${lat},${lon});
+  node["building"](around:${radius},${lat},${lon});
+);
+out count;
+(
+  node["highway"="bus_stop"](around:${radius},${lat},${lon});
+  node["railway"="station"](around:${radius},${lat},${lon});
+  node["railway"="halt"](around:${radius},${lat},${lon});
+);
+out count;
+(
+  node["shop"](around:${radius},${lat},${lon});
+  node["amenity"="restaurant"](around:${radius},${lat},${lon});
+  node["amenity"="cafe"](around:${radius},${lat},${lon});
+  node["amenity"="convenience"](around:${radius},${lat},${lon});
+);
+out count;
+(
+  way["highway"~"^(motorway|trunk|primary|secondary)$"](around:${radius},${lat},${lon});
+);
+out count;
+`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const resp = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    // 4つのoutブロックそれぞれのcount結果を抽出
+    const counts = data.elements
+      .filter(e => e.type === 'count')
+      .map(e => parseInt(e.tags?.total || '0', 10));
+    return {
+      buildings: counts[0] || 0,
+      transitStops: counts[1] || 0,
+      commercialPOI: counts[2] || 0,
+      majorRoads: counts[3] || 0,
+      radius
+    };
+  } catch (e) {
+    console.warn('Overpass fetch failed:', e.message);
+    return null;
+  }
+}
+
+
+// 外部AIを使わず、政府統計値をベースに実測データ（建物・交通・地名等）で補正するモデル。
+function estimateDensity(ctx) {
+  const { latitude, longitude, altitude, accuracy, weather, addr, now, overpass } = ctx;
+  const factors = [];
+
+  // ── ベース密度の決定：市区町村統計 > 都道府県統計 > 緯度ヒューリスティック ──
+  let baseDensity = null;
+  let baseSource = '';
+  const cityStat = lookupCityDensity(addr);
+  const prefStat = lookupPrefectureDensity(addr);
+
+  if (cityStat) {
+    baseDensity = cityStat; baseSource = `${addr.city} 市域統計値`;
+  } else if (prefStat) {
+    baseDensity = prefStat; baseSource = `${addr.state} 県平均統計値`;
+  } else {
+    baseDensity = 200; baseSource = '統計データなし（全国平均値で代用）';
+  }
+  factors.push({
+    name: '行政区域統計密度', value: `${baseDensity.toLocaleString()} 人/km² (${baseSource})`,
+    weight: 26, impact: 'neutral'
   });
+
+  // 乗算補正係数（1.0 = 統計値そのまま）
+  let multiplier = 1.0;
+
+  // ── 1. 周辺建物密度（Overpass実測：半径500m円内の建物数） ──
+  if (overpass) {
+    const areaKm2 = Math.PI * Math.pow(overpass.radius / 1000, 2); // ≈0.785km²
+    const buildingDensity = overpass.buildings / areaKm2;
+    let bMult = 1.0, bLabel;
+    if (buildingDensity > 3000) { bMult = 1.6; bLabel = '非常に高密度な建物集積'; }
+    else if (buildingDensity > 1200) { bMult = 1.25; bLabel = '高密度な建物集積'; }
+    else if (buildingDensity > 400) { bMult = 1.0; bLabel = '標準的な建物密度'; }
+    else if (buildingDensity > 100) { bMult = 0.65; bLabel = '低密度な建物分布'; }
+    else { bMult = 0.35; bLabel = '建物がまばら'; }
+    multiplier *= bMult;
+    factors.push({
+      name: '周辺建物密度 (実測)', value: `${overpass.buildings}棟/半径500m (${bLabel})`,
+      weight: 20, impact: bMult > 1.05 ? 'positive' : bMult < 0.9 ? 'negative' : 'neutral'
+    });
+
+    // ── 2. 交通アクセス度（駅・バス停の実数） ──
+    let tMult = 1.0, tLabel;
+    if (overpass.transitStops >= 5) { tMult = 1.3; tLabel = `${overpass.transitStops}箇所（交通至便）`; }
+    else if (overpass.transitStops >= 2) { tMult = 1.12; tLabel = `${overpass.transitStops}箇所（交通良好）`; }
+    else if (overpass.transitStops === 1) { tMult = 1.0; tLabel = '1箇所（交通あり）'; }
+    else { tMult = 0.8; tLabel = '0箇所（交通アクセス乏しい）'; }
+    multiplier *= tMult;
+    factors.push({
+      name: '交通アクセス (駅・バス停実測)', value: tLabel,
+      weight: 14, impact: tMult > 1.05 ? 'positive' : tMult < 0.9 ? 'negative' : 'neutral'
+    });
+
+    // ── 3. 商業・生活施設密度（店舗・飲食店・コンビニ実数） ──
+    let cMult = 1.0, cLabel;
+    if (overpass.commercialPOI >= 20) { cMult = 1.25; cLabel = `${overpass.commercialPOI}件（繁華街レベル）`; }
+    else if (overpass.commercialPOI >= 8) { cMult = 1.1; cLabel = `${overpass.commercialPOI}件（商業集積あり）`; }
+    else if (overpass.commercialPOI >= 2) { cMult = 1.0; cLabel = `${overpass.commercialPOI}件（生活圏レベル）`; }
+    else { cMult = 0.75; cLabel = `${overpass.commercialPOI}件（商業施設少ない）`; }
+    multiplier *= cMult;
+    factors.push({
+      name: '商業・生活施設密度 (実測)', value: cLabel,
+      weight: 14, impact: cMult > 1.05 ? 'positive' : cMult < 0.9 ? 'negative' : 'neutral'
+    });
+
+    // ── 4. 幹線道路の有無 ──
+    let rMult = 1.0, rLabel;
+    if (overpass.majorRoads >= 2) { rMult = 1.08; rLabel = `${overpass.majorRoads}本（幹線道路沿い）`; }
+    else if (overpass.majorRoads === 1) { rMult = 1.0; rLabel = '1本（幹線道路近接）'; }
+    else { rMult = 0.92; rLabel = 'なし（生活道路エリア）'; }
+    multiplier *= rMult;
+    factors.push({
+      name: '幹線道路アクセス (実測)', value: rLabel,
+      weight: 8, impact: rMult > 1.02 ? 'positive' : rMult < 0.98 ? 'negative' : 'neutral'
+    });
+  } else {
+    factors.push({
+      name: '周辺施設実測データ', value: '取得不可（Overpass APIに未接続）',
+      weight: 20, impact: 'neutral'
+    });
+  }
+
+  // ── 5. 住所解像度（番地まで取れる＝市街地的環境） ──
+  const hasHouseNumber = !!addr.house_number;
+  const hasRoad = !!addr.road;
+  const hasSuburb = !!(addr.suburb || addr.neighbourhood || addr.quarter);
+  let addrMult = 1.0;
+  if (hasHouseNumber && hasSuburb) addrMult = 1.1;
+  else if (!hasRoad && !hasSuburb) addrMult = 0.7;
+  multiplier *= addrMult;
+  factors.push({
+    name: '住所解像度', value: hasHouseNumber ? '番地レベルまで特定' : hasRoad ? '通りレベル' : '広域のみ',
+    weight: 10, impact: addrMult > 1.02 ? 'positive' : addrMult < 0.95 ? 'negative' : 'neutral'
+  });
+
+  // ── 6. 地名キーワード（繁華街/自然地名の補正） ──
+  const nameBlob = [addr.suburb, addr.neighbourhood, addr.quarter, addr.road, addr.city, addr.town, addr.village]
+    .filter(Boolean).join(' ');
+  const urbanKeywords = /駅前|丸の内|新宿|渋谷|梅田|難波|栄|博多|中央区|都心/;
+  const ruralKeywords = /村|山|高原|牧場|林道|国立公園|湖畔/;
+  let kwMult = 1.0, kwLabel = '特徴的キーワードなし';
+  if (urbanKeywords.test(nameBlob)) { kwMult = 1.15; kwLabel = '都心・繁華街の地名特徴'; }
+  else if (ruralKeywords.test(nameBlob) || addr.village) { kwMult = 0.8; kwLabel = '自然・村部の地名特徴'; }
+  multiplier *= kwMult;
+  factors.push({
+    name: '地名パターン', value: kwLabel,
+    weight: 6, impact: kwMult > 1.02 ? 'positive' : kwMult < 0.95 ? 'negative' : 'neutral'
+  });
+
+  // ── 7. 標高・地形 ──
+  let altMult = 1.0, altLabel = '不明（平均的地形と仮定）';
+  if (altitude !== null && altitude !== undefined && !isNaN(altitude)) {
+    if (altitude < 20) { altMult = 1.05; altLabel = `${Math.round(altitude)}m・低地/平野部`; }
+    else if (altitude < 100) { altMult = 1.0; altLabel = `${Math.round(altitude)}m・丘陵地`; }
+    else if (altitude < 400) { altMult = 0.75; altLabel = `${Math.round(altitude)}m・山間部`; }
+    else { altMult = 0.5; altLabel = `${Math.round(altitude)}m・高地`; }
+  }
+  multiplier *= altMult;
+  factors.push({
+    name: '標高・地形', value: altLabel,
+    weight: 8, impact: altMult > 1.02 ? 'positive' : altMult < 0.9 ? 'negative' : 'neutral'
+  });
+
+  // ── 8. 時間帯（昼間人口 vs 夜間人口の補正） ──
+  const hour = now.getHours();
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+  const isHoliday = isJapaneseHoliday(now);
+  const isDaytime = hour >= 8 && hour <= 19;
+  let timeMult = 1.0, timeLabel = '通常時間帯';
+  if (isDaytime && !isWeekend && !isHoliday) { timeMult = 1.08; timeLabel = '平日昼間（通勤・通学人口の流入想定）'; }
+  else if (!isDaytime) { timeMult = 0.95; timeLabel = '夜間（住宅地人口が主体）'; }
+  multiplier *= timeMult;
+  factors.push({
+    name: '時間帯・滞留人口補正', value: timeLabel,
+    weight: 6, impact: timeMult > 1.02 ? 'positive' : timeMult < 0.98 ? 'negative' : 'neutral'
+  });
+
+  // ── 9. 曜日・祝日 ──
+  const dayNames = ['日','月','火','水','木','金','土'];
+  let dayLabel = `${dayNames[now.getDay()]}曜日`;
+  let dayMult = 1.0;
+  if (isHoliday) { dayLabel += '・祝日'; dayMult = 0.97; }
+  else if (isWeekend) { dayLabel += '・週末'; dayMult = 0.97; }
+  else { dayLabel += '・平日'; dayMult = 1.02; }
+  multiplier *= dayMult;
+  factors.push({
+    name: '曜日・祝日補正', value: dayLabel,
+    weight: 4, impact: dayMult > 1.0 ? 'positive' : 'negative'
+  });
+
+  // ── 10. 気象条件（気温・降水・気圧） ──
+  let wMult = 1.0, wLabel = '気象データなし';
+  if (weather) {
+    const code = weather.weather_code;
+    const temp = weather.temperature_2m;
+    const precip = weather.precipitation;
+    wLabel = code !== undefined ? weatherDesc(code) : '不明';
+    if (code !== undefined && code >= 51) { wMult *= 0.97; wLabel += '・荒天'; }
+    if (temp !== undefined && (temp > 35 || temp < -5)) { wMult *= 0.96; wLabel += '・極端な気温'; }
+    if (precip !== undefined && precip > 0) { wLabel += `・降水${precip}mm`; }
+  }
+  multiplier *= wMult;
+  factors.push({
+    name: '気象条件', value: wLabel,
+    weight: 4, impact: wMult < 0.99 ? 'negative' : 'neutral'
+  });
+
+  // ── 最終密度の算出 ──
+  const density = Math.max(1, Math.round(baseDensity * multiplier));
+
+  // ── カテゴリ判定 ──
+  let category;
+  if (density < 30) category = '超過疎';
+  else if (density < 100) category = '過疎';
+  else if (density < 400) category = '農村';
+  else if (density < 1500) category = '郊外';
+  else if (density < 4000) category = '都市近郊';
+  else if (density < 10000) category = '都市';
+  else if (density < 20000) category = '高密度都市';
+  else category = '超高密度都市';
+
+  // ── 信頼度：使えた実データソースの数で算出 ──
+  let dataPoints = 0;
+  if (cityStat || prefStat) dataPoints += 2; // 統計データは重要なので2点分
+  if (overpass) dataPoints += 2;
+  if (addr.city || addr.town || addr.village) dataPoints++;
+  if (weather) dataPoints++;
+  if (altitude !== null && altitude !== undefined) dataPoints++;
+  if (accuracy !== undefined && accuracy < 100) dataPoints++;
+  const confidence_pct = Math.min(96, 30 + dataPoints * 9);
+  const confidence = confidence_pct >= 75 ? '高' : confidence_pct >= 50 ? '中' : '低';
+
+  // ── サマリー文生成 ──
+  const placeName = addr.city || addr.town || addr.village || addr.county || 'この地点';
+  const summaryParts = [`${placeName}は${baseSource}（${baseDensity.toLocaleString()}人/km²）を基準に`];
+  if (overpass) {
+    summaryParts.push(`半径500m圏内の建物${overpass.buildings}棟・交通拠点${overpass.transitStops}箇所・商業施設${overpass.commercialPOI}件の実測データで補正し、`);
+  }
+  summaryParts.push(`${category}地域（${density.toLocaleString()}人/km²）と推定されました。`);
+  const summary = summaryParts.join('');
+
+  factors.sort((a, b) => b.weight - a.weight);
+
+  return { density, category, confidence, confidence_pct, summary, factors, baseDensity, multiplier };
 }
 
-function flyTo(lat, lng) {
-  if (!gl) return;
-  gl.setProps({
-    initialViewState: {
-      longitude: lng, latitude: lat,
-      zoom: 10.4, pitch: 62, bearing: -14,
-      transitionDuration: 1600,
-      transitionInterpolator: new deck.FlyToInterpolator({ speed: 1.5 }),
+// ─── Real map (Leaflet) ────────────────────────────────────────────────────────
+let leafletMap = null;
+let mapMarker = null;
+let mapCircle = null;
+
+function renderRealMap(lat, lon, density, addr) {
+  // Ensure container is visible/sized before init
+  const container = document.getElementById('real-map');
+  if (!container) return;
+
+  const color = densityMainColor(density);
+
+  if (!leafletMap) {
+    leafletMap = L.map('real-map', {
+      zoomControl: true,
+      attributionControl: true
+    }).setView([lat, lon], 16);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap);
+  } else {
+    leafletMap.setView([lat, lon], 16);
+  }
+
+  // Remove old marker/circle
+  if (mapMarker) leafletMap.removeLayer(mapMarker);
+  if (mapCircle) leafletMap.removeLayer(mapCircle);
+
+  // Analysis radius circle (500m, matches Overpass query radius)
+  mapCircle = L.circle([lat, lon], {
+    radius: 500,
+    color: '#ff5722',
+    weight: 1.5,
+    fillColor: color,
+    fillOpacity: 0.18
+  }).addTo(leafletMap);
+
+  // Current location marker
+  const placeName = addr.city || addr.town || addr.village || addr.county || '現在地';
+  mapMarker = L.circleMarker([lat, lon], {
+    radius: 8,
+    color: '#ffffff',
+    weight: 2,
+    fillColor: '#00e5ff',
+    fillOpacity: 1
+  }).addTo(leafletMap);
+
+  mapMarker.bindPopup(
+    `<b>${placeName}</b><br>推定密度: ${density.toLocaleString()} 人/km²<br>${lat.toFixed(5)}, ${lon.toFixed(5)}`
+  ).openPopup();
+
+  // Fix sizing issues when container was previously display:none
+  setTimeout(() => leafletMap.invalidateSize(), 300);
+}
+
+// ─── Draw heatmap canvas ──────────────────────────────────────────────────────
+function drawHeatmap(density) {
+  const canvas = document.getElementById('density-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 860;
+  canvas.width = W;
+  canvas.height = 200;
+
+  // Normalize density to 0-1 (log scale, max ~50000)
+  const norm = Math.min(1, Math.log10(Math.max(1, density)) / Math.log10(50000));
+
+  // Create grid cells with variation
+  const cols = 40, rows = 12;
+  const cw = W / cols, ch = 200 / rows;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      // Distance from center (simulate city center)
+      const dx = (c - cols/2) / (cols/2);
+      const dy = (r - rows/2) / (rows/2);
+      const dist = Math.sqrt(dx*dx + dy*dy);
+
+      // Add noise + density gradient
+      const noise = (Math.random() * 0.3 - 0.15);
+      const cellNorm = Math.max(0, Math.min(1,
+        norm * (1 - dist * 0.5) + noise
+      ));
+
+      ctx.fillStyle = densityColor(cellNorm);
+      ctx.fillRect(c * cw + 0.5, r * ch + 0.5, cw - 1, ch - 1);
     }
-  });
-}
-
-// ══════════════════════════════════════════════════════
-//  統計パネル
-// ══════════════════════════════════════════════════════
-function updateStats(pts) {
-  const m={};
-  for (const p of pts) {
-    if(!m[p.n])m[p.n]={s:0,c:0};
-    m[p.n].s+=p.d; m[p.n].c++;
   }
-  const rows=Object.entries(m).map(([n,v])=>({n,avg:v.s/v.c})).sort((a,b)=>b.avg-a.avg).slice(0,9);
-  const top=rows[0]?.avg||1;
-  document.getElementById('rank-list').innerHTML=rows.map((r,i)=>{
-    const pct=(r.avg/top*100).toFixed(0);
-    const c=dColor(r.avg);
-    return `<div class="r-row">
-      <span class="r-n">${i+1}</span><span class="r-w">${r.n}</span>
-      <div class="r-bar">
-        <div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:rgb(${c[0]},${c[1]},${c[2]})"></div></div>
-        <span class="r-v">${(r.avg/1000).toFixed(1)}k</span>
-      </div></div>`;
-  }).join('');
-}
 
-// ══════════════════════════════════════════════════════
-//  データ更新
-// ══════════════════════════════════════════════════════
-let apiUrl = null;
-
-async function refresh() {
-  noisePhase++;
-  let pts;
-  try {
-    if (apiUrl) {
-      const r=await fetch(apiUrl); if(!r.ok) throw 0;
-      pts=await r.json();
-      document.getElementById('live-st').textContent='PDI LIVE · CONNECTED';
-      document.getElementById('sb-src').textContent='PDI API';
-    } else { pts=buildGrid(); }
-  } catch { pts=buildGrid(); }
-
-  if (gl) gl.setProps({ layers: makeLayers(pts) });
-  updateStats(pts);
-  document.getElementById('sb-time').textContent=new Date().toLocaleTimeString('ja-JP',{hour12:false});
-  document.getElementById('sb-cells').textContent=pts.length.toLocaleString('ja-JP');
-}
-
-// ══════════════════════════════════════════════════════
-//  位置情報 共通処理
-// ══════════════════════════════════════════════════════
-function setBtns(disabled) {
-  document.getElementById('btn-gps').disabled=disabled;
-  document.getElementById('btn-ip').disabled=disabled;
-}
-function setBadge(cls, txt) {
-  const el=document.getElementById('m-badge');
-  el.className='m-badge '+cls; el.textContent=txt;
-}
-function applyLocation(lat, lng, place, accTxt, icon, badgeCls, badgeTxt) {
-  userLat=lat; userLng=lng;
-  userPt=[{la:lat, lo:lng}];
-  document.getElementById('gp-place').textContent=place;
-  document.getElementById('gp-coords').textContent=`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  document.getElementById('gp-acc').textContent=accTxt;
-  document.getElementById('gp-icon').textContent=icon;
-  document.getElementById('sb-loc').textContent=`${lat.toFixed(3)}, ${lng.toFixed(3)}`;
-  setBadge(badgeCls, badgeTxt);
-  flyTo(lat, lng);
-  refresh();
-  setBtns(false);
-}
-
-// ── 逆ジオコーディング ──────────────────────────────
-async function revGeo(lat, lng) {
-  try {
-    const r=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=ja`);
-    const j=await r.json(); const a=j.address||{};
-    return a.city||a.town||a.village||a.county||a.state||`${lat.toFixed(3)},${lng.toFixed(3)}`;
-  } catch { return `${lat.toFixed(3)}, ${lng.toFixed(3)}`; }
-}
-
-// ── GPS ────────────────────────────────────────────
-async function tryGPS() {
-  setBtns(true); setBadge('wait','📍 GPS 取得中…');
-  document.getElementById('gp-place').textContent='取得中…';
-  if (!navigator.geolocation) {
-    setBadge('wait','GPS 非対応'); setBtns(false); tryIP(true); return;
+  // Overlay grid lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 0.5;
+  for (let r = 0; r <= rows; r++) {
+    ctx.beginPath(); ctx.moveTo(0, r*ch); ctx.lineTo(W, r*ch); ctx.stroke();
   }
-  navigator.geolocation.getCurrentPosition(
-    async pos => {
-      const {latitude:la, longitude:lo, accuracy:ac} = pos.coords;
-      const place = await revGeo(la, lo);
-      applyLocation(la, lo, place, `精度 ±${Math.round(ac)}m`, '📍', 'gps', '✓ GPS');
-    },
-    () => { setBadge('wait','GPS 失敗 → IP 試行中'); tryIP(true); },
-    { enableHighAccuracy:true, timeout:12000, maximumAge:0 }
-  );
-}
-
-// ── IP 位置情報 ────────────────────────────────────
-async function tryIP(silent=false) {
-  if (!silent) { setBtns(true); setBadge('wait','🌐 IP 取得中…'); }
-  try {
-    const r=await fetch('https://ipapi.co/json/');
-    const j=await r.json();
-    if (!j.latitude) throw 0;
-    const la=parseFloat(j.latitude), lo=parseFloat(j.longitude);
-    const place=j.city||j.region||j.country_name||'不明';
-    applyLocation(la, lo, place, `${j.org||''} / ${j.country_name||''}`, '🌐', 'ip', '🌐 IP位置情報');
-  } catch {
-    setBadge('wait','取得失敗 → 手動入力');
-    document.getElementById('gp-place').textContent='手動で座標を入力してください';
-    setBtns(false);
+  for (let c = 0; c <= cols; c++) {
+    ctx.beginPath(); ctx.moveTo(c*cw, 0); ctx.lineTo(c*cw, 200); ctx.stroke();
   }
+
+  // Center marker
+  const cx = W/2, cy = 100;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 14, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI*2);
+  ctx.fillStyle = 'white';
+  ctx.fill();
+
+  // Pulse ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, 22, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 }
 
-// ── 手動入力 ───────────────────────────────────────
-async function applyManual() {
-  const raw=document.getElementById('man-in').value.trim();
-  const pts=raw.split(/[,\s]+/).map(Number).filter(n=>!isNaN(n));
-  if (pts.length<2) { document.getElementById('man-in').style.outline='1px solid #e04040'; setTimeout(()=>document.getElementById('man-in').style.outline='',1500); return; }
-  const [la,lo]=[pts[0],pts[1]];
-  if (la<20||la>50||lo<120||lo>150) { document.getElementById('gp-acc').textContent='座標が範囲外 (緯度20-50, 経度120-150)'; return; }
-  const place=await revGeo(la,lo);
-  applyLocation(la, lo, place, '手動入力', '✎', 'manual', '✎ 手動設定');
-}
-
-// ══════════════════════════════════════════════════════
-//  カウントダウン
-// ══════════════════════════════════════════════════════
-let cnt=INTERVAL_S;
-setInterval(()=>{
-  cnt--; if(cnt<=0){cnt=INTERVAL_S;refresh();}
-  document.getElementById('prog-fill').style.width=(cnt/INTERVAL_S*100)+'%';
-  document.getElementById('sb-next').textContent=cnt+'s';
-},1000);
-
-// ══════════════════════════════════════════════════════
-//  キーボード
-// ══════════════════════════════════════════════════════
-document.addEventListener('keydown', e=>{ if(e.key==='Enter'&&document.activeElement===document.getElementById('man-in')) applyManual(); });
-
-// ══════════════════════════════════════════════════════
-//  起動シーケンス
-// ══════════════════════════════════════════════════════
-(function boot() {
-  const bar=document.getElementById('ld-b');
-  const msg=document.getElementById('ld-s');
-  const ld=document.getElementById('loading');
-  const steps=[
-    [20,  'deck.gl を初期化中…'],
-    [45,  '人口密度モデルを準備中…'],
-    [70,  'グリッドデータを生成中…'],
-    [90,  'マップタイルを読み込み中…'],
-    [100, '位置情報を取得中…'],
+function densityColor(n) {
+  // Blue → Cyan → Green → Yellow → Orange → Red
+  const stops = [
+    [0.00, [13, 71, 161]],
+    [0.15, [2, 136, 209]],
+    [0.30, [0, 188, 212]],
+    [0.45, [76, 175, 80]],
+    [0.60, [255, 235, 59]],
+    [0.75, [255, 152, 0]],
+    [0.88, [244, 67, 54]],
+    [1.00, [183, 28, 28]],
   ];
-  let i=0;
-  const iv=setInterval(()=>{
-    if (i>=steps.length) { clearInterval(iv); return; }
-    const [pct, txt]=steps[i++];
-    bar.style.width=pct+'%';
-    msg.textContent=txt;
-    if (pct===100) {
-      clearInterval(iv);
-      // deck.gl 初期化
-      initDeck();
-      // グリッド描画
-      refresh();
-      // ローディング解除
-      setTimeout(()=>{ ld.classList.add('fade'); setTimeout(()=>ld.remove(),900); },400);
-      // GPS 試行
-      setTimeout(()=>{ setBtns(false); tryGPS(); },800);
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [t0, c0] = stops[i];
+    const [t1, c1] = stops[i+1];
+    if (n >= t0 && n <= t1) {
+      const t = (n - t0) / (t1 - t0);
+      const r = Math.round(c0[0] + (c1[0]-c0[0])*t);
+      const g = Math.round(c0[1] + (c1[1]-c0[1])*t);
+      const b = Math.round(c0[2] + (c1[2]-c0[2])*t);
+      return `rgb(${r},${g},${b})`;
     }
-  }, 280);
-})();
+  }
+  return 'rgb(183,28,28)';
+}
+
+// ─── Density needle position ──────────────────────────────────────────────────
+function densityToPercent(density) {
+  // Log scale: 1 → 0%, 50000 → 100%
+  return Math.min(100, Math.max(0,
+    Math.log10(Math.max(1, density)) / Math.log10(50000) * 100
+  ));
+}
+
+// ─── Density color (for number display) ──────────────────────────────────────
+function densityMainColor(density) {
+  if (density < 50)    return '#29b6f6';
+  if (density < 200)   return '#26c6da';
+  if (density < 500)   return '#66bb6a';
+  if (density < 2000)  return '#ffca28';
+  if (density < 8000)  return '#ffa726';
+  return '#ef5350';
+}
+
+// ─── Render results ───────────────────────────────────────────────────────────
+function renderResults(result, geoData, weather, addr, overpass) {
+  const { density, category, confidence, confidence_pct, summary, factors } = result;
+  const color = densityMainColor(density);
+
+  // Density number
+  document.getElementById('density-number').textContent =
+    density.toLocaleString('ja-JP');
+  document.getElementById('density-number').style.color = color;
+  document.getElementById('density-number').style.textShadow = `0 0 40px ${color}80`;
+
+  // Category & confidence
+  document.getElementById('density-category').textContent = `◆ ${category}地域`;
+  document.getElementById('density-category').style.color = color;
+
+  const badge = document.getElementById('confidence-badge');
+  badge.textContent = `信頼度 ${confidence} (${confidence_pct}%)`;
+  badge.style.color = confidence === '高' ? '#00e5ff' :
+                      confidence === '中' ? '#ffb300' : '#ff3d57';
+  badge.style.borderColor = badge.style.color;
+
+  // Needle
+  setTimeout(() => {
+    document.getElementById('heatmap-needle').style.left =
+      densityToPercent(density) + '%';
+  }, 300);
+
+  // Data cards
+  const now = new Date();
+  const hour = now.getHours();
+  const timeLabel = hour < 6 ? '深夜' : hour < 12 ? '午前' : hour < 18 ? '午後' : '夜間';
+  const dayNames = ['日','月','火','水','木','金','土'];
+  const dayLabel = dayNames[now.getDay()] + '曜日';
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+
+  const wCode = weather?.weather_code ?? null;
+  const temp = weather?.temperature_2m ?? null;
+  const wind = weather?.wind_speed_10m ?? null;
+  const humidity = weather?.relative_humidity_2m ?? null;
+
+  const cards = [
+    {
+      icon:'📍', title:'位置情報', accent:'#00e5ff',
+      value: addr.city || addr.town || addr.village || addr.county || '不明',
+      sub: `${addr.state || ''} ${addr.country || '日本'} | 精度: ±${Math.round(geoData.accuracy||0)}m`
+    },
+    {
+      icon:'🕐', title:'日時・曜日', accent:'#9c27b0',
+      value: `${timeLabel} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`,
+      sub: `${dayLabel} ${isWeekend?'(休日)':'(平日)'}`
+    },
+    {
+      icon:'🌡️', title:'気象条件', accent:'#ff9800',
+      value: temp !== null ? `${temp}°C・${wCode !== null ? weatherDesc(wCode) : '不明'}` : '取得失敗',
+      sub: wind !== null ? `風速 ${wind} km/h / 湿度 ${humidity}%` : ''
+    },
+    {
+      icon:'🗺️', title:'地域区分', accent:'#4caf50',
+      value: addr.suburb || addr.neighbourhood || addr.quarter ||
+             addr.road || addr.town || '不明',
+      sub: addr.postcode ? `〒${addr.postcode}` : ''
+    },
+    {
+      icon:'📐', title:'座標', accent:'#00bcd4',
+      value: `${geoData.latitude.toFixed(5)}°N`,
+      sub: `${geoData.longitude.toFixed(5)}°E`
+    },
+    {
+      icon:'🏔️', title:'標高', accent:'#795548',
+      value: geoData.altitude ? `${Math.round(geoData.altitude)}m` : '不明',
+      sub: '海抜高度'
+    },
+    {
+      icon:'🏢', title:'周辺建物数', accent:'#e91e63',
+      value: overpass ? `${overpass.buildings.toLocaleString()} 棟` : '取得不可',
+      sub: overpass ? `半径${overpass.radius}m圏内 (実測)` : 'Overpass APIに未接続'
+    },
+    {
+      icon:'🚉', title:'交通拠点', accent:'#3f51b5',
+      value: overpass ? `${overpass.transitStops} 箇所` : '取得不可',
+      sub: '駅・バス停（半径500m）'
+    },
+    {
+      icon:'🏪', title:'商業・生活施設', accent:'#ff5722',
+      value: overpass ? `${overpass.commercialPOI} 件` : '取得不可',
+      sub: '店舗・飲食店・コンビニ等'
+    }
+  ];
+
+  const grid = document.getElementById('data-grid');
+  grid.innerHTML = cards.map(c => `
+    <div class="data-card" style="--accent:${c.accent}">
+      <span class="card-icon">${c.icon}</span>
+      <div class="card-title">${c.title}</div>
+      <div class="card-value">${c.value}</div>
+      <div class="card-sub">${c.sub}</div>
+    </div>
+  `).join('');
+
+  // Analysis text
+  document.getElementById('analysis-text').textContent = summary;
+
+  // Factors
+  const fg = document.getElementById('factors-grid');
+  const impactColor = i => i==='positive'?'#4caf50':i==='negative'?'#f44336':'#ffb300';
+  fg.innerHTML = (factors||[]).map(f => `
+    <div class="factor-item">
+      <div class="factor-name">${f.name}</div>
+      <div class="factor-val">${f.value}</div>
+      <div class="factor-weight">
+        <div class="weight-bar">
+          <div class="weight-fill" style="width:0%;background:${impactColor(f.impact)}"
+               data-w="${f.weight}"></div>
+        </div>
+        <span class="weight-pct">${f.weight}%</span>
+      </div>
+    </div>
+  `).join('');
+
+  // Animate weight bars
+  setTimeout(() => {
+    document.querySelectorAll('.weight-fill').forEach(el => {
+      el.style.width = el.dataset.w + '%';
+    });
+  }, 400);
+
+  // Draw canvas
+  setTimeout(() => drawHeatmap(density), 200);
+
+  // Draw real map
+  renderRealMap(geoData.latitude, geoData.longitude, density, addr);
+}
+
+// ─── Main scan ────────────────────────────────────────────────────────────────
+async function startScan() {
+  const btn = document.getElementById('scan-btn');
+  const scanning = document.getElementById('scanning');
+  const results = document.getElementById('results');
+  const errorBox = document.getElementById('error-box');
+
+  btn.disabled = true;
+  scanning.classList.add('active');
+  results.classList.remove('active');
+  errorBox.classList.remove('active');
+  logLines.length = 0;
+
+  addLog('位置情報を取得中...');
+
+  try {
+    // 1. Get location
+    const pos = await new Promise((res, rej) =>
+      navigator.geolocation.getCurrentPosition(res, rej, {
+        enableHighAccuracy: true, timeout: 10000, maximumAge: 0
+      })
+    );
+    const { latitude, longitude, altitude, accuracy } = pos.coords;
+
+    addLog(`座標取得完了 (精度: ±${Math.round(accuracy)}m)`);
+    document.getElementById('loc-display').textContent =
+      `${latitude.toFixed(5)}°N, ${longitude.toFixed(5)}°E`;
+    document.getElementById('scan-time').textContent =
+      new Date().toLocaleTimeString('ja-JP');
+
+    // 2. Fetch weather + geocode + overpass(building/transit/commercial) in parallel
+    addLog('気象データ・地名を取得中...');
+    addLog('周辺の建物・交通データを取得中(Overpass)...');
+    const [weather, addr, overpass] = await Promise.all([
+      fetchWeather(latitude, longitude),
+      reverseGeocode(latitude, longitude),
+      fetchOverpassData(latitude, longitude)
+    ]);
+
+    addLog(`地名: ${addr.city || addr.town || addr.village || '不明'}`);
+    if (weather) addLog(`気温: ${weather.temperature_2m}°C / ${weatherDesc(weather.weather_code)}`);
+    if (overpass) addLog(`周辺建物: ${overpass.buildings}棟 / 交通拠点: ${overpass.transitStops}箇所`);
+    else addLog('Overpass APIに接続できませんでした（統計値ベースで推定継続）');
+
+    // 3. 内蔵アルゴリズムで推定（外部AI不要）
+    const now = new Date();
+    addLog('アルゴリズムで推定中...');
+
+    const result = estimateDensity({
+      latitude, longitude, altitude, accuracy, weather, addr, now, overpass
+    });
+
+    addLog(`推定完了: ${result.density.toLocaleString()} 人/km²`);
+
+    // Show results
+    scanning.classList.remove('active');
+    results.classList.add('active');
+
+    renderResults(result, { latitude, longitude, altitude, accuracy }, weather, addr, overpass);
+
+  } catch(err) {
+    scanning.classList.remove('active');
+    let msg = 'エラーが発生しました。';
+    if (err.code === 1) msg = '位置情報の使用が許可されていません。ブラウザの設定から位置情報を許可してください。';
+    else if (err.code === 2) msg = '位置情報を取得できませんでした。屋外か窓の近くで再試行してください。';
+    else if (err.code === 3) msg = '位置情報の取得がタイムアウトしました。再試行してください。';
+    else msg = 'エラー: ' + err.message;
+
+    errorBox.textContent = '⚠ ' + msg;
+    errorBox.classList.add('active');
+    btn.disabled = false;
+  }
+}
+
+function resetApp() {
+  document.getElementById('results').classList.remove('active');
+  document.getElementById('error-box').classList.remove('active');
+  document.getElementById('scan-btn').disabled = false;
+  logLines.length = 0;
+}
 </script>
 </body>
 </html>
