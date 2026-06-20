@@ -790,13 +790,44 @@ const PREFECTURE_DENSITY = {
   '鹿児島県': 174, '沖縄県': 643
 };
 
-// 政令指定都市・特別区など、都道府県平均より大幅に高い既知の高密度都市部
-const KNOWN_HIGH_DENSITY_CITIES = {
-  '横浜市': 8500, '大阪市': 12300, '名古屋市': 7400, '札幌市': 1700,
-  '福岡市': 4700, '川崎市': 10900, '神戸市': 2700, '京都市': 1800,
-  'さいたま市': 6100, '広島市': 1320, '仙台市': 1370, '北九州市': 1900,
-  '千葉市': 3700, '堺市': 5500, '新潟市': 1050, '浜松市': 480,
-  '熊本市': 1900, '相模原市': 2300, '岡山市': 920, '静岡市': 470
+// ─── 区市町村レベル メッシュ統計テーブル（人/km²） ─────────────────────────────
+// 主要都市圏の区・市区町村別人口密度（公表人口・面積データに基づく概算値、約90地点）。
+// 都道府県平均より細かい粒度でベース密度を決定するための内蔵テーブル。
+// e-Stat APIキー不要で完結させるため、主要都市圏に範囲を限定して内蔵。
+const WARD_MESH_DENSITY = {
+  // 東京23区
+  '千代田区': 6200, '中央区': 17800, '港区': 13200, '新宿区': 19300, '渋谷区': 16100,
+  '文京区': 21800, '台東区': 20400, '墨田区': 19700, '江東区': 13100, '品川区': 18200,
+  '目黒区': 19500, '大田区': 13400, '世田谷区': 16700, '中野区': 22600, '杉並区': 17500,
+  '豊島区': 23600, '北区': 17400, '荒川区': 21900, '板橋区': 18400, '練馬区': 15200,
+  '足立区': 12700, '葛飾区': 13200, '江戸川区': 14300,
+  // 東京都下・多摩地域
+  '武蔵野市': 11800, '三鷹市': 11200, '府中市': 8200, '町田市': 4500, '八王子市': 2900,
+  '青梅市': 1100, '奥多摩町': 24,
+  // 横浜市
+  '横浜市西区': 9800, '横浜市中区': 7200, '横浜市港北区': 9500, '横浜市青葉区': 6800,
+  '横浜市旭区': 7500, '横浜市瀬谷区': 7800,
+  // 大阪市
+  '大阪市北区': 13200, '大阪市中央区': 15800, '大阪市西区': 19200, '大阪市天王寺区': 21500,
+  '大阪市生野区': 15100, '大阪市平野区': 11700,
+  // 名古屋市
+  '名古屋市中区': 9700, '名古屋市東区': 8600, '名古屋市千種区': 8200, '名古屋市中村区': 7600,
+  '名古屋市港区': 3400, '名古屋市天白区': 6700,
+  // 福岡市
+  '福岡市中央区': 10800, '福岡市博多区': 6700, '福岡市早良区': 4900, '福岡市西区': 2700,
+  // 札幌市
+  '札幌市中央区': 5300, '札幌市北区': 3600, '札幌市東区': 3400, '札幌市清田区': 2300,
+  // その他政令市・県庁所在地
+  '仙台市青葉区': 1700, '広島市中区': 6300, '静岡市葵区': 480, '岡山市北区': 1300,
+  '熊本市中央区': 6800, '金沢市': 1700, '松山市': 1500, '宇都宮市': 1100, '高松市': 1200,
+  // 郊外住宅都市
+  '川口市': 9700, '市川市': 8400, '草加市': 7700, '藤沢市': 4900, '枚方市': 6300,
+  '尼崎市': 8900, '豊田市': 480,
+  // 地方都市
+  '長野市': 480, '甲府市': 1100, '盛岡市': 460, '鳥取市': 290, '徳島市': 1500,
+  // 農村・過疎地域
+  '十日町市': 87, '大町市': 64, '飛騨市': 28, '北杜市': 65, '檮原町': 23,
+  '西粟倉村': 19, '白川村': 14, '天龍村': 12, '早川町': 4
 };
 
 function lookupPrefectureDensity(addr) {
@@ -804,10 +835,20 @@ function lookupPrefectureDensity(addr) {
   return PREFECTURE_DENSITY[pref] || null;
 }
 
+// 住所の city/town/village/suburb を組み合わせてメッシュテーブルを検索。
+// 「横浜市」+「西区」のように、市と区が別フィールドに分かれているケースに対応するため
+// 結合文字列でのマッチも試みる。
 function lookupCityDensity(addr) {
-  const city = addr.city || '';
-  for (const key in KNOWN_HIGH_DENSITY_CITIES) {
-    if (city.includes(key)) return KNOWN_HIGH_DENSITY_CITIES[key];
+  const city = addr.city || addr.town || '';
+  const suburb = addr.suburb || addr.city_district || '';
+  const combined = city + suburb;
+
+  // 完全一致優先（最も粒度の細かいマッチ）
+  for (const key in WARD_MESH_DENSITY) {
+    if (combined.includes(key)) return { density: WARD_MESH_DENSITY[key], matchedName: key, resolution: 'ward' };
+  }
+  for (const key in WARD_MESH_DENSITY) {
+    if (city.includes(key) || key.includes(city)) return { density: WARD_MESH_DENSITY[key], matchedName: key, resolution: 'ward' };
   }
   return null;
 }
@@ -825,16 +866,19 @@ function isJapaneseHoliday(date) {
 async function fetchOverpassData(lat, lon) {
   const radius = 500; // メートル
   const query = `
-[out:json][timeout:12];
+[out:json][timeout:15];
 (
   way["building"](around:${radius},${lat},${lon});
   node["building"](around:${radius},${lat},${lon});
 );
 out count;
 (
-  node["highway"="bus_stop"](around:${radius},${lat},${lon});
   node["railway"="station"](around:${radius},${lat},${lon});
   node["railway"="halt"](around:${radius},${lat},${lon});
+);
+out count;
+(
+  node["highway"="bus_stop"](around:${radius},${lat},${lon});
 );
 out count;
 (
@@ -851,7 +895,7 @@ out count;
 `;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
     const resp = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       body: 'data=' + encodeURIComponent(query),
@@ -861,15 +905,19 @@ out count;
     clearTimeout(timeoutId);
     if (!resp.ok) return null;
     const data = await resp.json();
-    // 4つのoutブロックそれぞれのcount結果を抽出
+    // 5つのoutブロックそれぞれのcount結果を抽出
     const counts = data.elements
       .filter(e => e.type === 'count')
       .map(e => parseInt(e.tags?.total || '0', 10));
+    const stationCount = counts[1] || 0;
+    const busStopCount = counts[2] || 0;
     return {
       buildings: counts[0] || 0,
-      transitStops: counts[1] || 0,
-      commercialPOI: counts[2] || 0,
-      majorRoads: counts[3] || 0,
+      stationCount,
+      busStopCount,
+      transitStops: stationCount + busStopCount, // 後方互換用の合計値
+      commercialPOI: counts[3] || 0,
+      majorRoads: counts[4] || 0,
       radius
     };
   } catch (e) {
@@ -891,7 +939,7 @@ function estimateDensity(ctx) {
   const prefStat = lookupPrefectureDensity(addr);
 
   if (cityStat) {
-    baseDensity = cityStat; baseSource = `${addr.city} 市域統計値`;
+    baseDensity = cityStat.density; baseSource = `${cityStat.matchedName} メッシュ統計値（区市町村レベル）`;
   } else if (prefStat) {
     baseDensity = prefStat; baseSource = `${addr.state} 県平均統計値`;
   } else {
@@ -899,53 +947,82 @@ function estimateDensity(ctx) {
   }
   factors.push({
     name: '行政区域統計密度', value: `${baseDensity.toLocaleString()} 人/km² (${baseSource})`,
-    weight: 26, impact: 'neutral'
+    weight: 21, impact: 'neutral'
   });
+
+  // ── 回帰分析で校正した乗数テーブル ──────────────────────────────────────
+  // 区市町村レベル人口密度データ(86地点)を教師データとし、建物密度/交通/商業の
+  // 各クラスを単変量回帰した係数を、多重共線性（VIF 8-14）を考慮して
+  // 重複補正したうえで採用。算出根拠は density_analysis/final_calibration.py 参照。
+  const CALIBRATED_MULTIPLIERS = {
+    building: { 0: 0.392, 1: 0.626, 2: 1.0, 3: 1.597, 4: 2.549 },
+    station:  { 0: 0.568, 1: 1.0, 2: 1.759, 3: 3.094 },
+    busStop:  { 0: 0.85, 1: 1.0, 2: 1.18, 3: 1.35 }, // 駅より緩やかな係数（生活圏指標として独立分離）
+    commercial: { 0: 0.6, 1: 1.0, 2: 1.666, 3: 2.775 }
+  };
 
   // 乗算補正係数（1.0 = 統計値そのまま）
   let multiplier = 1.0;
 
-  // ── 1. 周辺建物密度（Overpass実測：半径500m円内の建物数） ──
+  // ── 1. 周辺建物密度（Overpass実測：半径500m円内の建物数、回帰係数で校正） ──
   if (overpass) {
     const areaKm2 = Math.PI * Math.pow(overpass.radius / 1000, 2); // ≈0.785km²
     const buildingDensity = overpass.buildings / areaKm2;
-    let bMult = 1.0, bLabel;
-    if (buildingDensity > 3000) { bMult = 1.6; bLabel = '非常に高密度な建物集積'; }
-    else if (buildingDensity > 1200) { bMult = 1.25; bLabel = '高密度な建物集積'; }
-    else if (buildingDensity > 400) { bMult = 1.0; bLabel = '標準的な建物密度'; }
-    else if (buildingDensity > 100) { bMult = 0.65; bLabel = '低密度な建物分布'; }
-    else { bMult = 0.35; bLabel = '建物がまばら'; }
+    let bClass, bLabel;
+    if (buildingDensity > 3000) { bClass = 4; bLabel = '非常に高密度な建物集積'; }
+    else if (buildingDensity > 1200) { bClass = 3; bLabel = '高密度な建物集積'; }
+    else if (buildingDensity > 400) { bClass = 2; bLabel = '標準的な建物密度'; }
+    else if (buildingDensity > 100) { bClass = 1; bLabel = '低密度な建物分布'; }
+    else { bClass = 0; bLabel = '建物がまばら'; }
+    const bMult = CALIBRATED_MULTIPLIERS.building[bClass];
     multiplier *= bMult;
     factors.push({
-      name: '周辺建物密度 (実測)', value: `${overpass.buildings}棟/半径500m (${bLabel})`,
-      weight: 20, impact: bMult > 1.05 ? 'positive' : bMult < 0.9 ? 'negative' : 'neutral'
+      name: '周辺建物密度 (回帰係数校正済)', value: `${overpass.buildings}棟/半径500m (${bLabel}) ×${bMult}`,
+      weight: 18, impact: bMult > 1.05 ? 'positive' : bMult < 0.9 ? 'negative' : 'neutral'
     });
 
-    // ── 2. 交通アクセス度（駅・バス停の実数） ──
-    let tMult = 1.0, tLabel;
-    if (overpass.transitStops >= 5) { tMult = 1.3; tLabel = `${overpass.transitStops}箇所（交通至便）`; }
-    else if (overpass.transitStops >= 2) { tMult = 1.12; tLabel = `${overpass.transitStops}箇所（交通良好）`; }
-    else if (overpass.transitStops === 1) { tMult = 1.0; tLabel = '1箇所（交通あり）'; }
-    else { tMult = 0.8; tLabel = '0箇所（交通アクセス乏しい）'; }
-    multiplier *= tMult;
+    // ── 2. 鉄道駅アクセス度（駅単体・回帰係数で校正） ──
+    const stationCount = overpass.stationCount ?? overpass.transitStops ?? 0;
+    let sClass, sLabel;
+    if (stationCount >= 3) { sClass = 3; sLabel = `${stationCount}駅（鉄道至便）`; }
+    else if (stationCount >= 2) { sClass = 2; sLabel = `${stationCount}駅（鉄道良好）`; }
+    else if (stationCount === 1) { sClass = 1; sLabel = '1駅（鉄道あり）'; }
+    else { sClass = 0; sLabel = '駅なし'; }
+    const sMult = CALIBRATED_MULTIPLIERS.station[sClass];
+    multiplier *= sMult;
     factors.push({
-      name: '交通アクセス (駅・バス停実測)', value: tLabel,
-      weight: 14, impact: tMult > 1.05 ? 'positive' : tMult < 0.9 ? 'negative' : 'neutral'
+      name: '鉄道駅アクセス (実測・回帰校正)', value: `${sLabel} ×${sMult}`,
+      weight: 10, impact: sMult > 1.05 ? 'positive' : sMult < 0.9 ? 'negative' : 'neutral'
     });
 
-    // ── 3. 商業・生活施設密度（店舗・飲食店・コンビニ実数） ──
-    let cMult = 1.0, cLabel;
-    if (overpass.commercialPOI >= 20) { cMult = 1.25; cLabel = `${overpass.commercialPOI}件（繁華街レベル）`; }
-    else if (overpass.commercialPOI >= 8) { cMult = 1.1; cLabel = `${overpass.commercialPOI}件（商業集積あり）`; }
-    else if (overpass.commercialPOI >= 2) { cMult = 1.0; cLabel = `${overpass.commercialPOI}件（生活圏レベル）`; }
-    else { cMult = 0.75; cLabel = `${overpass.commercialPOI}件（商業施設少ない）`; }
+    // ── 3. バス停密度（駅から分離した独立要因・生活圏指標として軽めの重み） ──
+    const busStopCount = overpass.busStopCount ?? 0;
+    let buClass, buLabel;
+    if (busStopCount >= 6) { buClass = 3; buLabel = `${busStopCount}箇所（バス網稠密）`; }
+    else if (busStopCount >= 3) { buClass = 2; buLabel = `${busStopCount}箇所（バス網良好）`; }
+    else if (busStopCount >= 1) { buClass = 1; buLabel = `${busStopCount}箇所（バスあり）`; }
+    else { buClass = 0; buLabel = 'バス停なし'; }
+    const buMult = CALIBRATED_MULTIPLIERS.busStop[buClass];
+    multiplier *= buMult;
+    factors.push({
+      name: 'バス停密度 (実測・独立要因)', value: `${buLabel} ×${buMult}`,
+      weight: 6, impact: buMult > 1.05 ? 'positive' : buMult < 0.95 ? 'negative' : 'neutral'
+    });
+
+    // ── 4. 商業・生活施設密度（店舗・飲食店・コンビニ実数、回帰係数で校正） ──
+    let cClass, cLabel;
+    if (overpass.commercialPOI >= 20) { cClass = 3; cLabel = `${overpass.commercialPOI}件（繁華街レベル）`; }
+    else if (overpass.commercialPOI >= 8) { cClass = 2; cLabel = `${overpass.commercialPOI}件（商業集積あり）`; }
+    else if (overpass.commercialPOI >= 2) { cClass = 1; cLabel = `${overpass.commercialPOI}件（生活圏レベル）`; }
+    else { cClass = 0; cLabel = `${overpass.commercialPOI}件（商業施設少ない）`; }
+    const cMult = CALIBRATED_MULTIPLIERS.commercial[cClass];
     multiplier *= cMult;
     factors.push({
-      name: '商業・生活施設密度 (実測)', value: cLabel,
-      weight: 14, impact: cMult > 1.05 ? 'positive' : cMult < 0.9 ? 'negative' : 'neutral'
+      name: '商業・生活施設密度 (回帰係数校正済)', value: `${cLabel} ×${cMult}`,
+      weight: 10, impact: cMult > 1.05 ? 'positive' : cMult < 0.9 ? 'negative' : 'neutral'
     });
 
-    // ── 4. 幹線道路の有無 ──
+    // ── 5. 幹線道路の有無 ──
     let rMult = 1.0, rLabel;
     if (overpass.majorRoads >= 2) { rMult = 1.08; rLabel = `${overpass.majorRoads}本（幹線道路沿い）`; }
     else if (overpass.majorRoads === 1) { rMult = 1.0; rLabel = '1本（幹線道路近接）'; }
@@ -953,7 +1030,7 @@ function estimateDensity(ctx) {
     multiplier *= rMult;
     factors.push({
       name: '幹線道路アクセス (実測)', value: rLabel,
-      weight: 8, impact: rMult > 1.02 ? 'positive' : rMult < 0.98 ? 'negative' : 'neutral'
+      weight: 5, impact: rMult > 1.02 ? 'positive' : rMult < 0.98 ? 'negative' : 'neutral'
     });
   } else {
     factors.push({
@@ -972,7 +1049,7 @@ function estimateDensity(ctx) {
   multiplier *= addrMult;
   factors.push({
     name: '住所解像度', value: hasHouseNumber ? '番地レベルまで特定' : hasRoad ? '通りレベル' : '広域のみ',
-    weight: 10, impact: addrMult > 1.02 ? 'positive' : addrMult < 0.95 ? 'negative' : 'neutral'
+    weight: 8, impact: addrMult > 1.02 ? 'positive' : addrMult < 0.95 ? 'negative' : 'neutral'
   });
 
   // ── 6. 地名キーワード（繁華街/自然地名の補正） ──
@@ -986,7 +1063,7 @@ function estimateDensity(ctx) {
   multiplier *= kwMult;
   factors.push({
     name: '地名パターン', value: kwLabel,
-    weight: 6, impact: kwMult > 1.02 ? 'positive' : kwMult < 0.95 ? 'negative' : 'neutral'
+    weight: 5, impact: kwMult > 1.02 ? 'positive' : kwMult < 0.95 ? 'negative' : 'neutral'
   });
 
   // ── 7. 標高・地形 ──
@@ -1000,7 +1077,7 @@ function estimateDensity(ctx) {
   multiplier *= altMult;
   factors.push({
     name: '標高・地形', value: altLabel,
-    weight: 8, impact: altMult > 1.02 ? 'positive' : altMult < 0.9 ? 'negative' : 'neutral'
+    weight: 6, impact: altMult > 1.02 ? 'positive' : altMult < 0.9 ? 'negative' : 'neutral'
   });
 
   // ── 8. 時間帯（昼間人口 vs 夜間人口の補正） ──
@@ -1014,7 +1091,7 @@ function estimateDensity(ctx) {
   multiplier *= timeMult;
   factors.push({
     name: '時間帯・滞留人口補正', value: timeLabel,
-    weight: 6, impact: timeMult > 1.02 ? 'positive' : timeMult < 0.98 ? 'negative' : 'neutral'
+    weight: 5, impact: timeMult > 1.02 ? 'positive' : timeMult < 0.98 ? 'negative' : 'neutral'
   });
 
   // ── 9. 曜日・祝日 ──
@@ -1027,7 +1104,7 @@ function estimateDensity(ctx) {
   multiplier *= dayMult;
   factors.push({
     name: '曜日・祝日補正', value: dayLabel,
-    weight: 4, impact: dayMult > 1.0 ? 'positive' : 'negative'
+    weight: 3, impact: dayMult > 1.0 ? 'positive' : 'negative'
   });
 
   // ── 10. 気象条件（気温・降水・気圧） ──
@@ -1044,7 +1121,7 @@ function estimateDensity(ctx) {
   multiplier *= wMult;
   factors.push({
     name: '気象条件', value: wLabel,
-    weight: 4, impact: wMult < 0.99 ? 'negative' : 'neutral'
+    weight: 3, impact: wMult < 0.99 ? 'negative' : 'neutral'
   });
 
   // ── 最終密度の算出 ──
@@ -1063,20 +1140,21 @@ function estimateDensity(ctx) {
 
   // ── 信頼度：使えた実データソースの数で算出 ──
   let dataPoints = 0;
-  if (cityStat || prefStat) dataPoints += 2; // 統計データは重要なので2点分
+  if (cityStat) dataPoints += 3; // 区市町村レベルメッシュ統計は最も粒度が細かいため高評価
+  else if (prefStat) dataPoints += 1.5; // 県平均統計は粒度が粗いため評価を下げる
   if (overpass) dataPoints += 2;
   if (addr.city || addr.town || addr.village) dataPoints++;
   if (weather) dataPoints++;
   if (altitude !== null && altitude !== undefined) dataPoints++;
   if (accuracy !== undefined && accuracy < 100) dataPoints++;
-  const confidence_pct = Math.min(96, 30 + dataPoints * 9);
+  const confidence_pct = Math.min(96, Math.round(30 + dataPoints * 9));
   const confidence = confidence_pct >= 75 ? '高' : confidence_pct >= 50 ? '中' : '低';
 
   // ── サマリー文生成 ──
   const placeName = addr.city || addr.town || addr.village || addr.county || 'この地点';
   const summaryParts = [`${placeName}は${baseSource}（${baseDensity.toLocaleString()}人/km²）を基準に`];
   if (overpass) {
-    summaryParts.push(`半径500m圏内の建物${overpass.buildings}棟・交通拠点${overpass.transitStops}箇所・商業施設${overpass.commercialPOI}件の実測データで補正し、`);
+    summaryParts.push(`半径500m圏内の建物${overpass.buildings}棟・駅${overpass.stationCount ?? 0}箇所・バス停${overpass.busStopCount ?? 0}箇所・商業施設${overpass.commercialPOI}件の実測データで補正し、`);
   }
   summaryParts.push(`${category}地域（${density.toLocaleString()}人/km²）と推定されました。`);
   const summary = summaryParts.join('');
@@ -1128,9 +1206,12 @@ async function fetchOverpassGridData(centerLat, centerLon) {
 );
 out center;
 (
-  node["highway"="bus_stop"](${bbox});
   node["railway"="station"](${bbox});
   node["railway"="halt"](${bbox});
+);
+out center;
+(
+  node["highway"="bus_stop"](${bbox});
 );
 out center;
 (
@@ -1156,7 +1237,8 @@ out center;
     const data = await resp.json();
 
     const buildings = [];
-    const transit = [];
+    const stations = [];
+    const busStops = [];
     const commercial = [];
 
     for (const el of data.elements) {
@@ -1165,11 +1247,12 @@ out center;
       if (lat === undefined || lon === undefined) continue;
       const tags = el.tags || {};
       if (tags.building) buildings.push({ lat, lon });
-      else if (tags.highway === 'bus_stop' || tags.railway === 'station' || tags.railway === 'halt') transit.push({ lat, lon });
+      else if (tags.railway === 'station' || tags.railway === 'halt') stations.push({ lat, lon });
+      else if (tags.highway === 'bus_stop') busStops.push({ lat, lon });
       else if (tags.shop || tags.amenity === 'restaurant' || tags.amenity === 'cafe' || tags.amenity === 'convenience') commercial.push({ lat, lon });
     }
 
-    return { buildings, transit, commercial };
+    return { buildings, stations, busStops, commercial };
   } catch (e) {
     console.warn('Overpass grid fetch failed:', e.message);
     return null;
@@ -1177,12 +1260,13 @@ out center;
 }
 
 // 各グリッド点ごとに最近傍の要素をカウントし、密度スコアを算出
+// 回帰分析で校正したCALIBRATED_MULTIPLIERSと同一の係数を使用（中心点推定との整合性を保つ）
 function computeGridDensities(gridPoints, elements, baseDensity, baseMultiplier) {
   const step = (GRID_RADIUS_M * 2) / (GRID_SIZE - 1);
   const cellHalf = step / 2;
 
   return gridPoints.map(pt => {
-    let buildingCount = 0, transitCount = 0, commercialCount = 0;
+    let buildingCount = 0, stationCount = 0, busStopCount = 0, commercialCount = 0;
 
     const countInCell = (arr) => arr.filter(e => {
       const dx = (e.lon - pt.lon) * 111320 * Math.cos(pt.lat * Math.PI / 180);
@@ -1192,7 +1276,8 @@ function computeGridDensities(gridPoints, elements, baseDensity, baseMultiplier)
 
     if (elements) {
       buildingCount = countInCell(elements.buildings);
-      transitCount = countInCell(elements.transit);
+      stationCount = countInCell(elements.stations);
+      busStopCount = countInCell(elements.busStops);
       commercialCount = countInCell(elements.commercial);
     }
 
@@ -1200,28 +1285,32 @@ function computeGridDensities(gridPoints, elements, baseDensity, baseMultiplier)
     const cellAreaKm2 = Math.pow(step / 1000, 2);
     const buildingDensity = buildingCount / cellAreaKm2;
 
-    let bMult = 1.0;
-    if (buildingDensity > 3000) bMult = 1.6;
-    else if (buildingDensity > 1200) bMult = 1.25;
-    else if (buildingDensity > 400) bMult = 1.0;
-    else if (buildingDensity > 100) bMult = 0.65;
-    else bMult = 0.35;
+    // 回帰係数テーブル（estimateDensity内のCALIBRATED_MULTIPLIERSと同一値）
+    const bMult = buildingDensity > 3000 ? 2.549
+                : buildingDensity > 1200 ? 1.597
+                : buildingDensity > 400 ? 1.0
+                : buildingDensity > 100 ? 0.626
+                : 0.392;
 
-    let tMult = 1.0;
-    if (transitCount >= 3) tMult = 1.25;
-    else if (transitCount >= 1) tMult = 1.1;
-    else tMult = 0.85;
+    const sMult = stationCount >= 3 ? 3.094
+                : stationCount >= 2 ? 1.759
+                : stationCount === 1 ? 1.0
+                : 0.568;
 
-    let cMult = 1.0;
-    if (commercialCount >= 10) cMult = 1.2;
-    else if (commercialCount >= 3) cMult = 1.08;
-    else if (commercialCount >= 1) cMult = 1.0;
-    else cMult = 0.8;
+    const buMult = busStopCount >= 6 ? 1.35
+                 : busStopCount >= 3 ? 1.18
+                 : busStopCount >= 1 ? 1.0
+                 : 0.85;
 
-    const cellMultiplier = baseMultiplier * bMult * tMult * cMult;
+    const cMult = commercialCount >= 10 ? 1.666
+                : commercialCount >= 3 ? 1.0
+                : commercialCount >= 1 ? 1.0
+                : 0.6;
+
+    const cellMultiplier = baseMultiplier * bMult * sMult * buMult * cMult;
     const density = Math.max(1, Math.round(baseDensity * cellMultiplier));
 
-    return { ...pt, density, buildingCount, transitCount, commercialCount };
+    return { ...pt, density, buildingCount, stationCount, busStopCount, commercialCount };
   });
 }
 
@@ -1307,7 +1396,7 @@ function renderPointCloud(gridResults) {
     });
     marker.bindPopup(
       `推定密度: <b>${pt.density.toLocaleString()}</b> 人/km²<br>` +
-      `建物: ${pt.buildingCount} / 交通: ${pt.transitCount} / 商業: ${pt.commercialCount}`
+      `建物: ${pt.buildingCount} / 駅: ${pt.stationCount} / バス停: ${pt.busStopCount} / 商業: ${pt.commercialCount}`
     );
     marker.addTo(pointCloudLayer);
   });
@@ -1500,9 +1589,14 @@ function renderResults(result, geoData, weather, addr, overpass) {
       sub: overpass ? `半径${overpass.radius}m圏内 (実測)` : 'Overpass APIに未接続'
     },
     {
-      icon:'🚉', title:'交通拠点', accent:'#3f51b5',
-      value: overpass ? `${overpass.transitStops} 箇所` : '取得不可',
-      sub: '駅・バス停（半径500m）'
+      icon:'🚉', title:'鉄道駅', accent:'#3f51b5',
+      value: overpass ? `${overpass.stationCount ?? 0} 駅` : '取得不可',
+      sub: '半径500m圏内 (実測)'
+    },
+    {
+      icon:'🚌', title:'バス停', accent:'#009688',
+      value: overpass ? `${overpass.busStopCount ?? 0} 箇所` : '取得不可',
+      sub: '半径500m圏内 (実測・独立要因)'
     },
     {
       icon:'🏪', title:'商業・生活施設', accent:'#ff5722',
@@ -1628,7 +1722,7 @@ async function startScan() {
 
     addLog(`>> 地区特定: ${addr.city || addr.town || addr.village || '不明'}`);
     if (weather) addLog(`>> 気象: ${weather.temperature_2m}°C / ${weatherDesc(weather.weather_code)}`);
-    if (overpass) addLog(`>> 構造物検出: ${overpass.buildings}棟 / 交通拠点: ${overpass.transitStops}箇所`);
+    if (overpass) addLog(`>> 構造物検出: ${overpass.buildings}棟 / 駅${overpass.stationCount ?? 0} / バス停${overpass.busStopCount ?? 0}`);
     else addLog('>> OVERPASS接続失敗（統計値ベースで継続）');
 
     // 3. 内蔵アルゴリズムで推定（外部AI不要）
